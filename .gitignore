@@ -1,0 +1,22 @@
+# Dependencies / build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local env — real keys live here or in Vercel, never in git
+.env
+.env.*
+!.env.example
+
+# Editor / OS noise
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Vercel local link
+.vercel/
+
+# Test artifacts
+coverage/
