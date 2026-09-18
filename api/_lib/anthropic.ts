@@ -3,7 +3,7 @@
 // unset, so the app is fully usable (and testable) without a key.
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { ChatTurn, Digest } from '../../src/types';
+import type { ChatTurn, Digest } from '../../src/types.js';
 import {
   DIGEST_SYSTEM,
   askSystem,

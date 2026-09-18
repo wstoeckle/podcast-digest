@@ -4,7 +4,7 @@
 // links (oEmbed title → iTunes search → RSS), and direct audio URLs.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { ResolveResult } from '../src/types';
+import type { ResolveResult } from '../src/types.js';
 import { classifyLink, pickFromShareHtml } from '../src/lib/resolveUrl.js';
 import { fetchWithTimeout, jsonBody, methodNotAllowed, str } from './_lib/http.js';
 

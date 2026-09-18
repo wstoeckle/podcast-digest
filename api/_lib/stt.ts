@@ -3,7 +3,7 @@
 // transcode large audio inside the serverless function. Swap in Groq/Deepgram
 // later behind the same interface.
 
-import type { TranscriptStatus } from '../../src/types';
+import type { TranscriptStatus } from '../../src/types.js';
 
 export interface SttProvider {
   /** Kick off a transcription of a remote audio URL; returns a job id. */

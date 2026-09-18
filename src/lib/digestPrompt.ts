@@ -3,7 +3,7 @@
 // -output schema, transcript clamping, and the demo-mode canned content — all
 // unit-testable without a network or a key.
 
-import type { Digest } from '../types';
+import type { Digest } from '../types.js';
 
 export interface EpisodeMeta {
   showTitle?: string;

@@ -5,7 +5,7 @@
 // enclosure audio URLs, itunes:duration, and Podcasting-2.0
 // <podcast:transcript> tags.
 
-import type { Episode, FeedResult, Show } from '../types';
+import type { Episode, FeedResult, Show } from '../types.js';
 import { parseDuration } from './format.js';
 
 /** Small stable hash → base36, used for guids when a feed omits them. */

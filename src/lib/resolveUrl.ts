@@ -8,7 +8,7 @@
 // ids into a feed URL requires a network call (iTunes lookup / following the
 // share redirect), which the /api/resolve endpoint does. Kept pure + tested.
 
-import type { ResolveResult } from '../types';
+import type { ResolveResult } from '../types.js';
 
 const AUDIO_RE = /\.(mp3|m4a|aac|ogg|oga|opus|wav|m4b|flac)(\?|#|$)/i;
 

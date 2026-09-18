@@ -4,7 +4,7 @@
 // transcript endpoint populated.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { Digest } from '../src/types';
+import type { Digest } from '../src/types.js';
 import { generateDigest } from './_lib/anthropic.js';
 import { jsonBody, methodNotAllowed, str } from './_lib/http.js';
 import { llmGlobalPerHour, llmPerHour, rateLimit, tooMany } from './_lib/ratelimit.js';

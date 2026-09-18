@@ -3,7 +3,7 @@
 // is prompt-cached inside anthropic.ts so follow-ups in a session stay cheap.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { ChatTurn } from '../src/types';
+import type { ChatTurn } from '../src/types.js';
 import { streamAnswer } from './_lib/anthropic.js';
 import { jsonBody, methodNotAllowed, str } from './_lib/http.js';
 import { llmGlobalPerHour, llmPerHour, rateLimit, tooMany } from './_lib/ratelimit.js';

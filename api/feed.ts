@@ -2,7 +2,7 @@
 // and return the parsed show + episodes. Cached briefly in Redis when available.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { FeedResult } from '../src/types';
+import type { FeedResult } from '../src/types.js';
 import { parseFeed } from '../src/lib/rss.js';
 import { fetchWithTimeout, methodNotAllowed, safeRemoteUrl, str } from './_lib/http.js';
 import { redis } from './_lib/redis.js';

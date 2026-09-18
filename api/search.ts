@@ -2,7 +2,7 @@
 // podcasts and return a normalized list of shows (with feed URLs).
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { SearchResultShow } from '../src/types';
+import type { SearchResultShow } from '../src/types.js';
 import { fetchWithTimeout, methodNotAllowed, str } from './_lib/http.js';
 
 interface ItunesPodcast {

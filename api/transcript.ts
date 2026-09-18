@@ -8,7 +8,7 @@
 // Redis (Redis only caches the final text to avoid re-transcribing).
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { TranscriptResponse } from '../src/types';
+import type { TranscriptResponse } from '../src/types.js';
 import { toPlainTranscript } from '../src/lib/transcriptFormats.js';
 import { DEMO_TRANSCRIPT, MAX_TRANSCRIPT_CHARS } from '../src/lib/digestPrompt.js';
 import { fetchWithTimeout, jsonBody, methodNotAllowed, safeRemoteUrl, str } from './_lib/http.js';
