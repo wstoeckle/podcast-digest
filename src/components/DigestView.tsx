@@ -5,8 +5,10 @@ import ListenPlayer from './ListenPlayer';
 export default function DigestView({
   digest,
   sourceLabel,
+  onComplete,
 }: {
   digest: Digest;
+  onComplete?: (() => void) | undefined;
   sourceLabel?: string;
 }) {
   return (
@@ -17,7 +19,7 @@ export default function DigestView({
       </section>
 
       <section className="panel">
-        <ListenPlayer text={digestSpeechText(digest)} />
+        <ListenPlayer text={digestSpeechText(digest)} onComplete={onComplete} />
       </section>
 
       {digest.bullets.length > 0 && (

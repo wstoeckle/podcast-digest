@@ -106,3 +106,8 @@ export function estimateListenSec(text: string, rate: number): number {
   const safeRate = rate > 0 ? rate : 1;
   return Math.round((words / (170 * safeRate)) * 60);
 }
+
+/** Apply a reviewed plan as one local write. */
+export function replacePlaylist(items: PlaylistItem[]): void {
+  write(items.map(item => ({ ...item, addedAt: Date.now() })));
+}

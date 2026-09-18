@@ -107,3 +107,7 @@ export async function streamAsk(
     if (value) onDelta(decoder.decode(value, { stream: true }));
   }
 }
+
+export function recommendDigests(input: import('../lib/listening').RecommendationInput): Promise<import('../lib/listening').RecommendationResult> {
+  return postJson('/api/recommend', input);
+}

@@ -10,6 +10,7 @@ import {
   type PlaylistItem,
 } from '../lib/playlist';
 import { formatDuration } from '../lib/format';
+import { markHeard } from '../lib/listening';
 import {
   RATES,
   SentenceSpeaker,
@@ -66,6 +67,8 @@ export default function Playlist() {
   }
 
   advanceRef.current = () => {
+    const completed = items[current];
+    if (completed) markHeard(completed);
     if (current >= 0 && current + 1 < items.length) playAt(current + 1);
     else setCurrent(-1);
   };

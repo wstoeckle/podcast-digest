@@ -5,6 +5,7 @@ import Home from './pages/Home';
 import Show from './pages/Show';
 import Episode from './pages/Episode';
 import Playlist from './pages/Playlist';
+import ForYou from './pages/ForYou';
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/show" element={<Show />} />
           <Route path="/episode" element={<Episode />} />
+          <Route path="/for-you" element={<ForYou />} />
           <Route path="/playlist" element={<Playlist />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -113,3 +113,27 @@ standalone project. It is fully self-contained: `npm install` and every script
 | `npm run lint`      | ESLint (`--max-warnings=0`)                 |
 | `npm run typecheck` | `tsc -b --noEmit`                           |
 | `npm run icons`     | Regenerate PWA icons                        |
+
+## Interest-based listening plans (TypeSafe)
+
+Open **For you**, enter your interests, choose a digest-listening time and speed, and
+build a plan. Preview it before replacing the listen queue. TypeSafe scores interest
+fit and novelty against up to ten recent listens; deterministic code selects whole
+saved digests that fit the estimated time. Changing time/speed reuses the scores.
+The estimate uses the existing 170-words/minute TTS model, not full episode runtimes.
+
+Non-demo digests are remembered locally as they are generated (up to 100); existing
+queue items are included. Older library metadata has no summary: reopen those episodes
+once. Completion of episode/queue TTS and **Already heard this** record local history;
+opening or skipping an episode does not. **Forget listening history** makes them eligible
+again. No account is required. Interests and summaries leave the device only when
+**Build listening plan** is clicked; only the selected summaries, titles, interests,
+and recent summary history go to TypeSafe, not audio, feeds, or transcripts.
+
+Set server-only `TYPESAFE_API_KEY`; optional `TYPESAFE_MODEL` defaults to `jev-latest`.
+Use `vercel dev` to run the serverless API locally. Never prefix the key with `VITE_`. Missing credentials/errors leave the existing queue intact.
+The recommend endpoint uses the existing per-IP/global LLM rate-limit configuration
+(Upstash required for deployed enforcement), a 100KB payload limit, max 20 candidates,
+and max 10 history entries. Paid calls are mocked in tests. Ranking weights (.7 interest,
+.3 novelty) and minimum relevance (1.5/3), and minimum novelty (.75/3) are initial product heuristics, not accuracy
+claims. Suggestions are based on summaries, so they cannot recover omitted nuances.

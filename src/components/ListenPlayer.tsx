@@ -9,7 +9,9 @@ import {
   type SpeakerState,
 } from '../lib/tts';
 
-export default function ListenPlayer({ text }: { text: string }) {
+export default function ListenPlayer({ text, onComplete }: { text: string; onComplete?: (() => void) | undefined }) {
+  const completeRef = useRef(onComplete);
+  completeRef.current = onComplete;
   const supported = isTtsSupported();
   const sentences = useMemo(() => splitSentences(text), [text]);
   const speakerRef = useRef<SentenceSpeaker | null>(null);
@@ -25,6 +27,7 @@ export default function ListenPlayer({ text }: { text: string }) {
     const sp = new SentenceSpeaker();
     sp.onState = setState;
     sp.onIndex = setIndex;
+    sp.onComplete = () => completeRef.current?.();
     speakerRef.current = sp;
     return () => sp.stop();
   }, [supported]);

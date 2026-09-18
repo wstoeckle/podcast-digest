@@ -591,3 +591,13 @@ button {
   gap: 0.7rem;
   max-width: calc(100vw - 2rem);
 }
+
+.for-you-link { color: var(--ink); white-space: nowrap; font-size: .9rem; text-decoration: none; }
+.listening-form { display: grid; gap: .8rem; }
+.listening-form textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 6rem; background: var(--surface); color: var(--ink); border: 1px solid var(--hairline); border-radius: var(--radius-sm); padding: .8rem; font: inherit; line-height: 1.5; }
+.listening-form textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.listening-controls select { background: var(--surface); color: var(--ink); border: 1px solid var(--hairline); border-radius: 6px; padding: .4rem; font: inherit; }
+.listening-controls { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.listening-controls select { margin-left: .4rem; }
+.listening-pick { padding: 1rem 0; border-top: 1px solid var(--hairline); }
+.listening-pick h3 { margin-bottom: .3rem; }

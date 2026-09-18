@@ -5,6 +5,7 @@ import { fetchFeed, getDigest, pollTranscript, startTranscript } from '../net/ap
 import { inLibrary, saveToLibrary, toggleLibrary } from '../lib/library';
 import { addToPlaylist, inPlaylist } from '../lib/playlist';
 import DigestView from '../components/DigestView';
+import { rememberDigest, markHeard } from '../lib/listening';
 import AskChat from '../components/AskChat';
 import PasteTranscript from '../components/PasteTranscript';
 
@@ -89,6 +90,12 @@ export default function Episode() {
         });
         if (!alive()) return;
         setDigest(d);
+        if (!d.demo) rememberDigest({
+          guid: resolved.ep.guid, showTitle: resolved.showTitle, episodeTitle: resolved.ep.title,
+          ...(resolved.feedUrl ? { feedUrl: resolved.feedUrl } : {}),
+          ...(resolved.artwork ? { artwork: resolved.artwork } : {}),
+          tldr: d.tldr, bullets: d.bullets, topics: d.topics,
+        });
         setPhase('ready');
 
         // Auto-save to the library so a processed episode is never lost. We only
@@ -126,7 +133,7 @@ export default function Episode() {
   const usePasted = useCallback((text: string) => run({ pasted: text }), [run]);
 
   function onQueue() {
-    if (!ctx || !digest) return;
+    if (!ctx || !digest || digest.demo) return;
     addToPlaylist({
       guid: ctx.ep.guid,
       showTitle: ctx.showTitle,
@@ -203,7 +210,7 @@ export default function Episode() {
             </div>
           )}
           <div className="ep-actions">
-            <button className="btn subtle" onClick={onQueue} disabled={queued}>
+            <button className="btn subtle" onClick={onQueue} disabled={queued || digest.demo}>
               {queued ? '✓ In your queue' : '＋ Add to queue'}
             </button>
             {queued && (
@@ -212,7 +219,10 @@ export default function Episode() {
               </Link>
             )}
           </div>
-          <DigestView digest={digest} sourceLabel={sourceLabel(source)} />
+          <DigestView digest={digest} sourceLabel={sourceLabel(source)} onComplete={() => {
+            if (!digest.demo && ctx) markHeard({ guid: ctx.ep.guid, showTitle: ctx.showTitle, episodeTitle: ctx.ep.title,
+              ...(ctx.feedUrl ? { feedUrl: ctx.feedUrl } : {}), tldr: digest.tldr, bullets: digest.bullets, addedAt: Date.now() });
+          }} />
           {(source === 'demo' || source === 'stt') && (
             <PasteTranscript
               onSubmit={usePasted}
