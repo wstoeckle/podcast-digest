@@ -60,10 +60,19 @@ export interface TranscriptResponse {
   error?: string;
 }
 
+export interface OutlineItem {
+  title: string;
+  summary: string;
+}
+
 export interface Digest {
   tldr: string;
   bullets: string[];
   topics: string[];
+  /** The episode's segments in order. Absent on digests made before v2. */
+  outline?: OutlineItem[];
+  /** Short lines verified to appear word for word in the transcript. Absent before v2. */
+  quotes?: string[];
   /** True when produced by demo mode (no ANTHROPIC_API_KEY). */
   demo?: boolean;
 }

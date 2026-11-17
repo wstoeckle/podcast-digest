@@ -33,6 +33,33 @@ export default function DigestView({
         </section>
       )}
 
+      {digest.quotes && digest.quotes.length > 0 && (
+        <section className="panel">
+          <div className="digest-h">In their words</div>
+          <ul className="quotes">
+            {digest.quotes.map((q, i) => (
+              <li key={i}>
+                <blockquote className="quote">{q}</blockquote>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {digest.outline && digest.outline.length > 0 && (
+        <section className="panel">
+          <div className="digest-h">Episode outline</div>
+          <ol className="outline">
+            {digest.outline.map((s, i) => (
+              <li key={i}>
+                <span className="seg-title">{s.title}</span>
+                {s.summary && <span className="seg-summary"> — {s.summary}</span>}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       {(digest.topics.length > 0 || sourceLabel) && (
         <section className="panel">
           {digest.topics.length > 0 && (

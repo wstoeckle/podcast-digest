@@ -3,7 +3,7 @@
 // -output schema, transcript clamping, and the demo-mode canned content — all
 // unit-testable without a network or a key.
 
-import type { Digest } from '../types.js';
+import type { Digest, OutlineItem } from '../types.js';
 
 export interface EpisodeMeta {
   showTitle?: string;
@@ -29,8 +29,27 @@ export const DIGEST_SCHEMA = {
       description: '3-8 short topic tags (1-3 words each).',
       items: { type: 'string' },
     },
+    outline: {
+      type: 'array',
+      description: "The episode's main segments in the order they happen, 3-10 entries.",
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          title: { type: 'string', description: 'A short segment title, 2-6 words.' },
+          summary: { type: 'string', description: 'One sentence on what the segment covers.' },
+        },
+        required: ['title', 'summary'],
+      },
+    },
+    quotes: {
+      type: 'array',
+      description:
+        'Up to 4 short, telling lines copied word for word from the transcript (under 40 words each). Never paraphrase: return fewer quotes rather than an inexact one.',
+      items: { type: 'string' },
+    },
   },
-  required: ['tldr', 'bullets', 'topics'],
+  required: ['tldr', 'bullets', 'topics', 'outline', 'quotes'],
 } as const;
 
 export const DIGEST_SYSTEM = [
@@ -42,7 +61,11 @@ export const DIGEST_SYSTEM = [
   'transcript is partial or unclear, summarize what is there and do not guess.',
 ].join(' ');
 
-/** Rough char budget so we stay well inside context (Haiku = 200k tokens). */
+/**
+ * Rough char budget (~80k tokens, 6+ hours of speech). Current models take 1M
+ * tokens, but staying under 100k keeps Claude Haiku 5.5 on its cheaper rate
+ * card and bounds the cost of any one request.
+ */
 export const MAX_TRANSCRIPT_CHARS = 320_000;
 
 export function clampTranscript(text: string, max = MAX_TRANSCRIPT_CHARS): string {
@@ -53,12 +76,16 @@ export function clampTranscript(text: string, max = MAX_TRANSCRIPT_CHARS): strin
   return `${text.slice(0, head)}\n\n[…transcript truncated for length…]\n\n${text.slice(-tail)}`;
 }
 
-const JSON_INSTRUCTION = [
-  'Respond with a single JSON object and nothing else — no prose, no code fence.',
-  'Shape: {"tldr": string (2-4 sentences), "bullets": string[] (4-8 items, each',
-  'one sentence), "topics": string[] (3-8 short tags)}.',
+// The reply's shape is enforced by structured outputs (DIGEST_SCHEMA); this
+// says what each part is for.
+const DIGEST_INSTRUCTION = [
+  'Write the digest of this episode: a 2-4 sentence TLDR; the 4-8 most important',
+  'points, one sentence each; 3-8 short topic tags; an outline of the main',
+  'segments in the order they happen; and up to 4 short lines quoted word for',
+  'word from the transcript that capture what was said.',
 ].join(' ');
 
+/** The transcript comes first and the request last, which suits long inputs. */
 export function digestUserText(transcript: string, meta: EpisodeMeta): string {
   const header = [
     meta.showTitle ? `Show: ${meta.showTitle}` : null,
@@ -67,22 +94,54 @@ export function digestUserText(transcript: string, meta: EpisodeMeta): string {
     .filter(Boolean)
     .join('\n');
   return [
-    header,
-    '',
-    JSON_INSTRUCTION,
-    '',
+    header || null,
+    header ? '' : null,
     '<transcript>',
     clampTranscript(transcript),
     '</transcript>',
+    '',
+    DIGEST_INSTRUCTION,
   ]
     .filter((l) => l !== null)
     .join('\n');
 }
 
+/** Lowercase, strip accents and punctuation, collapse whitespace. */
+export function normalizeForMatch(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
 /**
- * Parse Claude's digest reply into a Digest. Tolerant of a stray code fence or
- * surrounding prose: extracts the first balanced JSON object and coerces the
- * fields. Throws only if no usable object is found.
+ * Keep only quotes that appear word for word in the transcript (ignoring case
+ * and punctuation), so the digest never shows a line nobody said. Drops
+ * duplicates and fragments under four words.
+ */
+export function keepVerbatimQuotes(quotes: string[], transcript: string, max = 4): string[] {
+  const haystack = ` ${normalizeForMatch(transcript)} `;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of quotes) {
+    const quote = raw.trim().replace(/^["“”'‘’]+|["“”'‘’]+$/g, '').trim();
+    const needle = normalizeForMatch(quote);
+    if (needle.split(' ').length < 4 || seen.has(needle)) continue;
+    if (!haystack.includes(` ${needle} `)) continue;
+    seen.add(needle);
+    out.push(quote);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * Parse Claude's digest reply into a Digest. Structured outputs make the reply
+ * clean JSON, but this stays tolerant of a stray code fence or surrounding
+ * prose: extracts the first balanced JSON object and coerces the fields.
+ * Throws only if no usable object is found.
  */
 export function parseDigestResponse(text: string): Digest {
   const json = extractJsonObject(text);
@@ -103,7 +162,18 @@ export function parseDigestResponse(text: string): Digest {
     ? rec.topics.filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
     : [];
   if (!tldr && bullets.length === 0) throw new Error('digest response had no content');
-  return { tldr, bullets, topics };
+  const outline = Array.isArray(rec.outline) ? rec.outline.flatMap(toOutlineItem) : [];
+  const quotes = Array.isArray(rec.quotes)
+    ? rec.quotes.filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
+    : [];
+  return { tldr, bullets, topics, outline, quotes };
+}
+
+function toOutlineItem(v: unknown): OutlineItem[] {
+  if (typeof v !== 'object' || v === null) return [];
+  const { title, summary } = v as Record<string, unknown>;
+  if (typeof title !== 'string' || !title.trim()) return [];
+  return [{ title: title.trim(), summary: typeof summary === 'string' ? summary.trim() : '' }];
 }
 
 function extractJsonObject(text: string): string | null {
@@ -155,6 +225,25 @@ export function demoDigest(meta: EpisodeMeta): Digest {
       'Save an episode to your library (the heart) to keep its digest for later; it lives only on this device.',
     ],
     topics: ['demo mode', 'setup', 'how it works'],
+    outline: [
+      {
+        title: 'How the app works',
+        summary: 'The host sets up an end-to-end walkthrough with no API keys configured.',
+      },
+      {
+        title: 'What demo mode does',
+        summary:
+          'The guest explains that transcript, digest, and answers are canned samples until real keys are added.',
+      },
+      {
+        title: 'Listening offline',
+        summary: 'Read-aloud uses on-device speech synthesis, so it works offline with no key.',
+      },
+    ],
+    quotes: [
+      'The moment you add real keys, the exact same flow runs against the real episode audio and Claude.',
+      'On-device speech synthesis, so it works offline and needs no key at all.',
+    ],
   };
 }
 
