@@ -370,6 +370,47 @@ button {
 .bullets li {
   margin: 0 0 0.55rem;
 }
+.quotes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.quote {
+  font-family: var(--font-read);
+  font-size: 1.02rem;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0.05rem 0 0.05rem 0.85rem;
+  border-left: 3px solid var(--accent);
+}
+.quote::before {
+  content: '“';
+}
+.quote::after {
+  content: '”';
+}
+.outline {
+  font-family: var(--font-read);
+  font-size: 1rem;
+  line-height: 1.55;
+  margin: 0;
+  padding-left: 1.4rem;
+}
+.outline li {
+  margin: 0 0 0.6rem;
+}
+.outline li::marker {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+.outline .seg-title {
+  font-weight: 600;
+}
+.outline .seg-summary {
+  color: var(--ink-muted);
+}
 .topics {
   display: flex;
   flex-wrap: wrap;

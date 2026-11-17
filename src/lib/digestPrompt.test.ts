@@ -1,18 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import {
+  DEMO_TRANSCRIPT,
   DIGEST_SCHEMA,
   clampTranscript,
   digestUserText,
   demoDigest,
   askSystem,
+  keepVerbatimQuotes,
+  normalizeForMatch,
   parseDigestResponse,
 } from './digestPrompt';
 
 describe('DIGEST_SCHEMA', () => {
-  it('requires the three digest fields and forbids extras', () => {
-    expect(DIGEST_SCHEMA.required).toEqual(['tldr', 'bullets', 'topics']);
+  it('requires every digest field and forbids extras', () => {
+    expect(DIGEST_SCHEMA.required).toEqual(['tldr', 'bullets', 'topics', 'outline', 'quotes']);
     expect(DIGEST_SCHEMA.additionalProperties).toBe(false);
     expect(DIGEST_SCHEMA.properties.bullets.items.type).toBe('string');
+  });
+
+  it('makes outline items strict objects (structured outputs needs this)', () => {
+    const item = DIGEST_SCHEMA.properties.outline.items;
+    expect(item.additionalProperties).toBe(false);
+    expect(item.required).toEqual(['title', 'summary']);
   });
 });
 
@@ -39,6 +48,47 @@ describe('digestUserText', () => {
     expect(out).toContain('Show: Show');
     expect(out).toContain('Episode: Ep');
     expect(out).toContain('<transcript>\nthe words\n</transcript>');
+  });
+
+  it('puts the transcript before the request', () => {
+    const out = digestUserText('the words', {});
+    expect(out.startsWith('<transcript>')).toBe(true);
+    expect(out.indexOf('</transcript>')).toBeLessThan(out.indexOf('Write the digest'));
+  });
+});
+
+describe('keepVerbatimQuotes', () => {
+  const transcript =
+    'Host: So what changed? Guest: Honestly, the batteries got cheap — and once they got cheap, everything else followed. Host: Wow.';
+
+  it('keeps a quote that appears word for word, ignoring case and punctuation', () => {
+    const q = '"The batteries got cheap, and once they got cheap, everything else followed."';
+    expect(keepVerbatimQuotes([q], transcript)).toEqual([
+      'The batteries got cheap, and once they got cheap, everything else followed.',
+    ]);
+  });
+
+  it('drops paraphrases and invented lines', () => {
+    expect(
+      keepVerbatimQuotes(['Batteries became cheap and then everything followed'], transcript),
+    ).toEqual([]);
+  });
+
+  it('matches whole words only', () => {
+    expect(keepVerbatimQuotes(['atteries got cheap and once'], transcript)).toEqual([]);
+  });
+
+  it('drops fragments under four words and duplicates, and caps the count', () => {
+    const ok = 'the batteries got cheap';
+    expect(keepVerbatimQuotes(['got cheap', ok, ok.toUpperCase()], transcript)).toEqual([ok]);
+    const many = Array(6)
+      .fill(0)
+      .map((_, i) => `word${i} a b c`);
+    expect(keepVerbatimQuotes(many, many.join(' . '), 4)).toHaveLength(4);
+  });
+
+  it('normalizes accents and dashes', () => {
+    expect(normalizeForMatch('Café — déjà vu!')).toBe('cafe deja vu');
   });
 });
 
@@ -73,6 +123,26 @@ describe('parseDigestResponse', () => {
     expect(d.bullets).toEqual(['a', 'b']);
   });
 
+  it('reads the outline and quotes, skipping malformed entries', () => {
+    const d = parseDigestResponse(
+      JSON.stringify({
+        tldr: 't',
+        bullets: ['a'],
+        topics: [],
+        outline: [{ title: ' Intro ', summary: 'Hi.' }, { summary: 'no title' }, 'x', null],
+        quotes: ['a real line here', 3, ''],
+      }),
+    );
+    expect(d.outline).toEqual([{ title: 'Intro', summary: 'Hi.' }]);
+    expect(d.quotes).toEqual(['a real line here']);
+  });
+
+  it('accepts older replies without outline or quotes', () => {
+    const d = parseDigestResponse('{"tldr":"t","bullets":["a"],"topics":[]}');
+    expect(d.outline).toEqual([]);
+    expect(d.quotes).toEqual([]);
+  });
+
   it('throws when there is no JSON object', () => {
     expect(() => parseDigestResponse('no json here')).toThrow();
   });
@@ -89,5 +159,11 @@ describe('demoDigest', () => {
     expect(d.bullets.length).toBeGreaterThanOrEqual(4);
     expect(d.topics.length).toBeGreaterThan(0);
     expect(d.tldr).toContain('X');
+    expect(d.outline?.length).toBeGreaterThan(0);
+  });
+
+  it('only quotes lines the demo transcript actually contains', () => {
+    const d = demoDigest({});
+    expect(keepVerbatimQuotes(d.quotes ?? [], DEMO_TRANSCRIPT)).toEqual(d.quotes);
   });
 });

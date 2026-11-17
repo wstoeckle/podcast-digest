@@ -11,7 +11,7 @@ import { llmGlobalPerHour, llmPerHour, rateLimit, tooMany } from './_lib/ratelim
 import { CACHE_TTL_SECONDS, redis } from './_lib/redis.js';
 
 // Bump when the prompt/schema changes so stale digests aren't served.
-const PROMPT_VERSION = 'v1';
+const PROMPT_VERSION = 'v2';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return methodNotAllowed(res, 'POST');

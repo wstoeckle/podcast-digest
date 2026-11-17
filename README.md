@@ -11,7 +11,9 @@ listen to** in a fraction of the runtime.
   (Podcasting 2.0 `<podcast:transcript>`), otherwise **auto-transcribes** the
   audio via AssemblyAI (URL ingest — we never move the audio through the
   function).
-- **Digest**: Claude writes a faithful TLDR + key points + topics, grounded
+- **Digest**: Claude writes a faithful TLDR, key points, topics, an episode
+  outline, and short quotes (shown only if they appear word for word in the
+  transcript), grounded
   strictly in the transcript.
 - **Ask**: streamed follow-up Q&A over the same transcript (prompt-cached).
 - **Listen**: on-device speech synthesis reads the digest aloud — offline, no
@@ -45,7 +47,8 @@ All optional (see `.env.example`). Set them in your Vercel project (or
 | Variable                                          | Enables                                             |
 | ------------------------------------------------- | --------------------------------------------------- |
 | `ANTHROPIC_API_KEY`                               | Real digests + Q&A (Claude).                        |
-| `DIGEST_MODEL` (optional)                         | Model override; default `claude-opus-4-8`. Set `claude-haiku-4-5` for cheaper runs on long transcripts. |
+| `DIGEST_MODEL` (optional)                         | Model override; default `claude-opus-5-5`. Set `claude-haiku-5-5` for much cheaper runs. |
+| `DIGEST_EFFORT` / `ASK_EFFORT` (optional)         | How hard Claude thinks: `low`, `medium`, `high`, `xhigh`, `max`. Defaults `medium` (digest) / `low` (Q&A). Lower is faster and cheaper. |
 | `ASSEMBLYAI_API_KEY`                              | Auto-transcription of episodes without a published transcript. |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Caching transcripts + digests, **and per-IP rate limiting** on the paid endpoints. |
 | `RL_LLM_PER_HOUR` / `RL_STT_PER_HOUR` (optional) | Per-IP hourly caps for digest+Q&A / new transcriptions. Defaults 40 / 15. |
@@ -72,7 +75,7 @@ SSO), which gates the site at the edge before any function runs.
 ## Deploy
 
 Deployed as its **own** Vercel project (it has its own `vercel.json`). Point a
-Vercel project at `apps/podcast-digest` as the root directory, add the env vars
+Vercel project at this repo's root, add the env vars
 above, and deploy.
 
 ## Self-hosting (bring your own keys)
@@ -92,8 +95,9 @@ run your own copy:
    automatic with Upstash) and set hard budget caps in the Anthropic and
    AssemblyAI consoles.
 
-Total cost at personal scale is small: Claude per digest (pennies; set
-`DIGEST_MODEL=claude-haiku-4-5` to make it cheaper), AssemblyAI only for shows
+Total cost at personal scale is small: Claude per digest (an estimated 5–15¢
+for an hour-long episode on the default Claude Opus 5.5, under a cent with
+`DIGEST_MODEL=claude-haiku-5-5`; each call logs its token use), AssemblyAI only for shows
 without a published transcript (or paste one in — free), Upstash and Vercel
 free tiers are plenty.
 
