@@ -2,17 +2,33 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
+  "rewrites": [
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
   "headers": [
     {
       "source": "/manifest.webmanifest",
-      "headers": [{ "key": "Content-Type", "value": "application/manifest+json" }]
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        }
+      ]
     },
     {
       "source": "/sw.js",
       "headers": [
-        { "key": "Cache-Control", "value": "no-cache" },
-        { "key": "Service-Worker-Allowed", "value": "/" }
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        },
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        }
       ]
     }
   ],
@@ -20,5 +36,11 @@
     "api/*.ts": {
       "maxDuration": 300
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/overnight",
+      "schedule": "0 9 * * *"
+    }
+  ]
 }

@@ -3,12 +3,19 @@
 // -output schema, transcript clamping, and the demo-mode canned content — all
 // unit-testable without a network or a key.
 
-import type { Digest, OutlineItem } from '../types.js';
+import type { Digest, OutlineItem, Quote } from '../types.js';
+import { lastMarkerTime, parseClock, timedParagraphs } from './timed.js';
 
 export interface EpisodeMeta {
   showTitle?: string;
   episodeTitle?: string;
 }
+
+/**
+ * Version of the digest prompt + schema. Cached digests are keyed by it
+ * (`d:<version>:<guid>`), so bump it whenever either changes.
+ */
+export const PROMPT_VERSION = 'v3';
 
 /** JSON Schema for the structured digest (output_config.format). */
 export const DIGEST_SCHEMA = {
@@ -38,8 +45,13 @@ export const DIGEST_SCHEMA = {
         properties: {
           title: { type: 'string', description: 'A short segment title, 2-6 words.' },
           summary: { type: 'string', description: 'One sentence on what the segment covers.' },
+          start: {
+            type: 'string',
+            description:
+              'Where the segment begins: the [m:ss] or [h:mm:ss] time marker of the transcript paragraph it starts in, without brackets (e.g. "12:34"). Empty string if the transcript has no time markers.',
+          },
         },
-        required: ['title', 'summary'],
+        required: ['title', 'summary', 'start'],
       },
     },
     quotes: {
@@ -82,7 +94,9 @@ const DIGEST_INSTRUCTION = [
   'Write the digest of this episode: a 2-4 sentence TLDR; the 4-8 most important',
   'points, one sentence each; 3-8 short topic tags; an outline of the main',
   'segments in the order they happen; and up to 4 short lines quoted word for',
-  'word from the transcript that capture what was said.',
+  'word from the transcript that capture what was said. If the transcript has',
+  '[m:ss] time markers, give each outline segment the marker of the paragraph',
+  'where it begins.',
 ].join(' ');
 
 /** The transcript comes first and the request last, which suits long inputs. */
@@ -111,30 +125,60 @@ export function normalizeForMatch(text: string): string {
   return text
     .toLowerCase()
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
 
 /**
- * Keep only quotes that appear word for word in the transcript (ignoring case
- * and punctuation), so the digest never shows a line nobody said. Drops
- * duplicates and fragments under four words.
+ * Keep only quotes that appear word for word in the transcript (ignoring case,
+ * punctuation and time markers), so the digest never shows a line nobody said,
+ * and attach the time of the paragraph each one starts in. Drops duplicates
+ * and fragments under four words.
  */
-export function keepVerbatimQuotes(quotes: string[], transcript: string, max = 4): string[] {
-  const haystack = ` ${normalizeForMatch(transcript)} `;
+export function groundQuotes(quotes: string[], transcript: string, max = 4): Quote[] {
+  // One normalized haystack, remembering where each paragraph starts in it.
+  let haystack = ' ';
+  const starts: { pos: number; start?: number }[] = [];
+  for (const p of timedParagraphs(transcript)) {
+    const n = normalizeForMatch(p.text);
+    if (!n) continue;
+    starts.push(p.start !== undefined ? { pos: haystack.length, start: p.start } : { pos: haystack.length });
+    haystack += `${n} `;
+  }
   const seen = new Set<string>();
-  const out: string[] = [];
+  const out: Quote[] = [];
   for (const raw of quotes) {
-    const quote = raw.trim().replace(/^["“”'‘’]+|["“”'‘’]+$/g, '').trim();
-    const needle = normalizeForMatch(quote);
+    const text = raw.trim().replace(/^["“”'‘’]+|["“”'‘’]+$/g, '').trim();
+    const needle = normalizeForMatch(text);
     if (needle.split(' ').length < 4 || seen.has(needle)) continue;
-    if (!haystack.includes(` ${needle} `)) continue;
+    const at = haystack.indexOf(` ${needle} `);
+    if (at < 0) continue;
     seen.add(needle);
-    out.push(quote);
+    let start: number | undefined;
+    for (const p of starts) {
+      if (p.pos > at + 1) break;
+      start = p.start;
+    }
+    out.push(start !== undefined ? { text, start } : { text });
     if (out.length >= max) break;
   }
   return out;
+}
+
+/**
+ * Check a parsed digest against its transcript: quotes must appear verbatim
+ * (and get their times), and outline times must fall inside the transcript.
+ */
+export function groundDigest(digest: Digest, transcript: string): Digest {
+  const last = lastMarkerTime(transcript);
+  const outline = (digest.outline ?? []).map((item) => {
+    if (item.start === undefined) return item;
+    if (last !== undefined && item.start <= last + 60) return item;
+    return { title: item.title, summary: item.summary };
+  });
+  const quotes = groundQuotes((digest.quotes ?? []).map((q) => q.text), transcript);
+  return { ...digest, outline, quotes };
 }
 
 /**
@@ -163,17 +207,22 @@ export function parseDigestResponse(text: string): Digest {
     : [];
   if (!tldr && bullets.length === 0) throw new Error('digest response had no content');
   const outline = Array.isArray(rec.outline) ? rec.outline.flatMap(toOutlineItem) : [];
-  const quotes = Array.isArray(rec.quotes)
-    ? rec.quotes.filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
+  const quotes: Quote[] = Array.isArray(rec.quotes)
+    ? rec.quotes.flatMap((q) => (typeof q === 'string' && q.trim() ? [{ text: q.trim() }] : []))
     : [];
   return { tldr, bullets, topics, outline, quotes };
 }
 
 function toOutlineItem(v: unknown): OutlineItem[] {
   if (typeof v !== 'object' || v === null) return [];
-  const { title, summary } = v as Record<string, unknown>;
+  const { title, summary, start } = v as Record<string, unknown>;
   if (typeof title !== 'string' || !title.trim()) return [];
-  return [{ title: title.trim(), summary: typeof summary === 'string' ? summary.trim() : '' }];
+  const item: OutlineItem = {
+    title: title.trim(),
+    summary: typeof summary === 'string' ? summary.trim() : '',
+  };
+  const at = typeof start === 'string' ? parseClock(start) : undefined;
+  return [at !== undefined ? { ...item, start: at } : item];
 }
 
 function extractJsonObject(text: string): string | null {
@@ -229,33 +278,42 @@ export function demoDigest(meta: EpisodeMeta): Digest {
       {
         title: 'How the app works',
         summary: 'The host sets up an end-to-end walkthrough with no API keys configured.',
+        start: 0,
       },
       {
         title: 'What demo mode does',
         summary:
           'The guest explains that transcript, digest, and answers are canned samples until real keys are added.',
+        start: 12,
       },
       {
         title: 'Listening offline',
         summary: 'Read-aloud uses on-device speech synthesis, so it works offline with no key.',
+        start: 41,
       },
     ],
     quotes: [
-      'The moment you add real keys, the exact same flow runs against the real episode audio and Claude.',
-      'On-device speech synthesis, so it works offline and needs no key at all.',
+      {
+        text: 'The moment you add real keys, the exact same flow runs against the real episode audio and Claude.',
+        start: 12,
+      },
+      { text: 'On-device speech synthesis, so it works offline and needs no key at all.', start: 41 },
     ],
   };
 }
 
 export const DEMO_TRANSCRIPT = [
-  'Host: Welcome back to the show. Today we are talking about how this podcast',
-  'digest app works, end to end, without any API keys configured.',
-  'Guest: Right — so in demo mode, the transcript, the digest, and the answers',
-  'you get are all canned samples. The moment you add real keys, the exact same',
-  'flow runs against the real episode audio and Claude.',
-  'Host: And the listening piece?',
-  'Guest: On-device speech synthesis, so it works offline and needs no key at all.',
-].join(' ');
+  '[0:00] Host: Welcome back to the show. Today we are talking about how this podcast digest app works, end to end, without any API keys configured.',
+  '[0:12] Guest: Right — so in demo mode, the transcript, the digest, and the answers you get are all canned samples. The moment you add real keys, the exact same flow runs against the real episode audio and Claude.',
+  '[0:38] Host: And the listening piece?',
+  '[0:41] Guest: On-device speech synthesis, so it works offline and needs no key at all.',
+].join('\n');
+
+/** The passage the demo answer cites, so the citation UI shows without a key. */
+export const DEMO_CITATION = {
+  text: 'The moment you add real keys, the exact same flow runs against the real episode audio and Claude.',
+  start: 12,
+} as const;
 
 export function demoAnswer(question: string): string {
   return `That's a great question about "${question.slice(0, 80)}". This is a demo-mode answer: with an ANTHROPIC_API_KEY set, I'd answer this strictly from the episode's transcript, quoting what was actually said. For now, this placeholder confirms the Q&A round-trip (streaming, history, and grounding) is wired up correctly.`;

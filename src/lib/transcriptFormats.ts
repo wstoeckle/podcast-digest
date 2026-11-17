@@ -2,8 +2,13 @@
 // WebVTT, SRT, Podcasting-2.0 JSON, generic JSON, or plain text/HTML — into
 // clean plain text for the model. Pure and format-sniffing; the `type` hint
 // (a MIME string) is used when present but content is the tiebreaker.
+//
+// toTimedTranscript() keeps the timing when the source has it, as `[m:ss]`
+// paragraph markers (see timed.ts), so outline segments, quotes and cited
+// answers can jump into the audio.
 
 import { stripHtml } from './rss.js';
+import { formatTimed, type Cue } from './timed.js';
 
 function collapse(s: string): string {
   return s
@@ -106,4 +111,140 @@ export function toPlainTranscript(raw: string, type?: string): string {
   if (/-->/.test(body) && /\d{2}:\d{2}/.test(body)) return fromVtt(body);
   if (t.includes('html') || /<\/?[a-z][\s\S]*>/i.test(body)) return collapse(stripHtml(body));
   return collapse(body);
+}
+
+// ---- Timed transcripts ------------------------------------------------------
+
+/**
+ * Like toPlainTranscript, but keeps the timing as `[m:ss]` paragraph markers
+ * when the source has it (VTT, SRT, Podcasting-2.0 JSON with start times, or
+ * pasted text with timestamps). Falls back to plain text otherwise.
+ */
+export function toTimedTranscript(raw: string, type?: string): string {
+  const cues = timedCues(raw.trim(), (type ?? '').toLowerCase());
+  if (cues && cues.length >= 2) return formatTimed(cues);
+  return toPlainTranscript(raw, type);
+}
+
+function timedCues(body: string, t: string): Cue[] | null {
+  if (!body) return null;
+  if (t.includes('vtt') || t.includes('srt') || t.includes('subrip') || /-->/.test(body)) {
+    return cueBlocks(body);
+  }
+  if (t.includes('json') || body.startsWith('{') || body.startsWith('[')) {
+    const fromJson = jsonCues(body);
+    if (fromJson) return fromJson;
+  }
+  return textCues(body);
+}
+
+/** "00:01:02.500", "01:02.500", "00:01:02,500" → seconds. */
+function cueTime(raw: string): number | undefined {
+  const m = /^(?:(\d+):)?(\d{1,2}):(\d{2})(?:[.,](\d{1,3}))?$/.exec(raw.trim());
+  if (!m) return undefined;
+  const h = m[1] ? parseInt(m[1], 10) : 0;
+  const frac = m[4] ? parseInt(m[4].padEnd(3, '0'), 10) / 1000 : 0;
+  return h * 3600 + parseInt(m[2] ?? '0', 10) * 60 + parseInt(m[3] ?? '0', 10) + frac;
+}
+
+/** WebVTT and SRT: blank-line separated blocks with a `start --> end` line. */
+function cueBlocks(body: string): Cue[] | null {
+  const cues: Cue[] = [];
+  for (const block of body.split(/\r?\n\s*\r?\n/)) {
+    const lines = block.split(/\r?\n/).map((l) => l.trim());
+    const timing = lines.findIndex((l) => l.includes('-->'));
+    if (timing < 0) continue;
+    const start = cueTime((lines[timing] ?? '').split('-->')[0] ?? '');
+    if (start === undefined) continue;
+    let speaker: string | undefined;
+    const text = lines
+      .slice(timing + 1)
+      .map((l) => {
+        const v = /^<v(?:\.[^\s>]+)?\s+([^>]+)>/.exec(l);
+        if (v?.[1]) speaker = v[1].trim();
+        return l.replace(/<[^>]+>/g, '').trim();
+      })
+      .filter(Boolean)
+      .join(' ');
+    if (text) cues.push(speaker ? { start, text, speaker } : { start, text });
+  }
+  return cues.length ? cues : null;
+}
+
+/** Podcasting 2.0 JSON: { segments: [{ startTime, body, speaker? }] }. */
+function jsonCues(body: string): Cue[] | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const arr = Array.isArray(data)
+    ? data
+    : isRecord(data) && Array.isArray(data.segments)
+      ? data.segments
+      : null;
+  if (!arr) return null;
+  const cues: Cue[] = [];
+  for (const seg of arr) {
+    if (!isRecord(seg)) continue;
+    const text = str(seg.body) ?? str(seg.text);
+    const start =
+      typeof seg.startTime === 'number'
+        ? seg.startTime
+        : typeof seg.start === 'number'
+          ? seg.start
+          : undefined;
+    if (!text || start === undefined || !Number.isFinite(start)) continue;
+    const speaker = str(seg.speaker) ?? str(seg.speaker_name);
+    cues.push(speaker ? { start, text, speaker } : { start, text });
+  }
+  return cues.length ? cues : null;
+}
+
+const LEADING_TIME = /^[[(]?((?:\d{1,2}:)?\d{1,2}:\d{2})(?:[.,]\d+)?[\])]?\s*(?:[-–—:|]\s*)?(.*)$/;
+const SPEAKER_THEN_TIME = /^(.{1,60}?)\s*[[(]?((?:\d{1,2}:)?\d{1,2}:\d{2})[\])]?\s*$/;
+
+/**
+ * Pasted text with timestamps, in the shapes transcript sites use:
+ *   "[12:34] text", "00:12:34 Speaker: text", a timestamp on its own line, or
+ *   a "Speaker Name  12:34" header line followed by what they said.
+ * Needs at least three timestamps in order; otherwise it isn't timed.
+ */
+function textCues(body: string): Cue[] | null {
+  const cues: Cue[] = [];
+  let cur: Cue | null = null;
+  for (const raw of body.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const lead = LEADING_TIME.exec(line);
+    // A "Speaker Name  12:34" header: a short name, not a sentence ending in a time.
+    const headMatch = lead ? null : SPEAKER_THEN_TIME.exec(line);
+    const head = headMatch && (headMatch[1] ?? '').split(/\s+/).length <= 5 ? headMatch : null;
+    const time = lead ? clock(lead[1]) : head ? clock(head[2]) : undefined;
+    if (time !== undefined) {
+      if (cur?.text) cues.push(cur);
+      const speaker = head ? head[1]?.replace(/[:\-–—]+$/, '').trim() : undefined;
+      const text = lead ? (lead[2] ?? '').trim() : '';
+      cur = speaker ? { start: time, text, speaker } : { start: time, text };
+      continue;
+    }
+    if (cur) cur.text = cur.text ? `${cur.text} ${line}` : line;
+  }
+  if (cur?.text) cues.push(cur);
+  if (cues.length < 3) return null;
+  // Timestamps should run forward; a handful out of order means they aren't times.
+  let backwards = 0;
+  for (let i = 1; i < cues.length; i++) {
+    if ((cues[i]?.start ?? 0) < (cues[i - 1]?.start ?? 0)) backwards++;
+  }
+  return backwards > cues.length / 10 ? null : cues;
+}
+
+function clock(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const parts = raw.split(':').map((p) => parseInt(p, 10));
+  if (parts.some((n) => Number.isNaN(n))) return undefined;
+  if ((parts[parts.length - 1] ?? 0) >= 60) return undefined;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
 }

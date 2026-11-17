@@ -9,9 +9,7 @@ import { generateDigest } from './_lib/anthropic.js';
 import { jsonBody, methodNotAllowed, str } from './_lib/http.js';
 import { llmGlobalPerHour, llmPerHour, rateLimit, tooMany } from './_lib/ratelimit.js';
 import { CACHE_TTL_SECONDS, redis } from './_lib/redis.js';
-
-// Bump when the prompt/schema changes so stale digests aren't served.
-const PROMPT_VERSION = 'v2';
+import { digestKey } from './_lib/transcripts.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return methodNotAllowed(res, 'POST');
@@ -24,7 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const kv = redis();
-  const key = `d:${PROMPT_VERSION}:${guid}`;
+  const key = digestKey(guid);
 
   if (kv) {
     const cached = await kv.get<Digest>(key);

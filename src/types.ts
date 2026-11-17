@@ -63,6 +63,14 @@ export interface TranscriptResponse {
 export interface OutlineItem {
   title: string;
   summary: string;
+  /** Seconds into the episode, when the transcript has times. */
+  start?: number;
+}
+
+export interface Quote {
+  text: string;
+  /** Seconds into the episode, when the transcript has times. */
+  start?: number;
 }
 
 export interface Digest {
@@ -72,7 +80,7 @@ export interface Digest {
   /** The episode's segments in order. Absent on digests made before v2. */
   outline?: OutlineItem[];
   /** Short lines verified to appear word for word in the transcript. Absent before v2. */
-  quotes?: string[];
+  quotes?: Quote[];
   /** True when produced by demo mode (no ANTHROPIC_API_KEY). */
   demo?: boolean;
 }
@@ -80,4 +88,47 @@ export interface Digest {
 export interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
+}
+
+/** A transcript passage an answer is based on. */
+export interface Citation {
+  /** The exact transcript text, without time markers. */
+  text: string;
+  /** Seconds into the episode, when the transcript has times. */
+  start?: number;
+}
+
+/** One line of the /api/ask stream (newline-delimited JSON). */
+export type AskEvent =
+  | { type: 'text'; text: string }
+  | ({ type: 'cite' } & Citation)
+  | { type: 'error'; message: string };
+
+/** A digest made overnight for a new episode of a followed show. */
+export interface OvernightItem {
+  guid: string;
+  feedUrl: string;
+  showTitle: string;
+  episodeTitle: string;
+  publishedAt?: string;
+  artwork?: string;
+  tldr: string;
+  /** epoch ms */
+  digestedAt: number;
+}
+
+/** GET /api/overnight. */
+export interface OvernightStatus {
+  /** False when the server lacks what overnight digests need (reason says what). */
+  available: boolean;
+  reason?: string;
+  /** True when the nightly run is set up (CRON_SECRET is configured). */
+  scheduled: boolean;
+  /** Shows the server checks each night. */
+  following: number;
+  /** Episodes being transcribed or digested right now. */
+  pending: number;
+  /** epoch ms of the last nightly run. */
+  lastRunAt?: number;
+  items: OvernightItem[];
 }

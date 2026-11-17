@@ -1,16 +1,22 @@
 import type { Digest } from '../types';
 import { digestSpeechText } from '../lib/playlist';
 import ListenPlayer from './ListenPlayer';
+import TimeChip from './TimeChip';
 
 export default function DigestView({
   digest,
   sourceLabel,
   onComplete,
+  onSeek,
 }: {
   digest: Digest;
   onComplete?: (() => void) | undefined;
   sourceLabel?: string;
+  /** Plays the episode from a time; set when the episode audio is available. */
+  onSeek?: ((seconds: number) => void) | undefined;
 }) {
+  const timedOutline = digest.outline?.some((s) => s.start !== undefined) ?? false;
+
   return (
     <>
       <section className="panel">
@@ -39,7 +45,12 @@ export default function DigestView({
           <ul className="quotes">
             {digest.quotes.map((q, i) => (
               <li key={i}>
-                <blockquote className="quote">{q}</blockquote>
+                <blockquote className="quote">{q.text}</blockquote>
+                {q.start !== undefined && (
+                  <div className="quote-time">
+                    <TimeChip seconds={q.start} onSeek={onSeek} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -49,9 +60,10 @@ export default function DigestView({
       {digest.outline && digest.outline.length > 0 && (
         <section className="panel">
           <div className="digest-h">Episode outline</div>
-          <ol className="outline">
+          <ol className={timedOutline ? 'outline timed' : 'outline'}>
             {digest.outline.map((s, i) => (
               <li key={i}>
+                {s.start !== undefined && <TimeChip seconds={s.start} onSeek={onSeek} />}
                 <span className="seg-title">{s.title}</span>
                 {s.summary && <span className="seg-summary"> — {s.summary}</span>}
               </li>

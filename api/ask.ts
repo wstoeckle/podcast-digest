@@ -1,9 +1,10 @@
 // POST /api/ask { guid?, transcript?, showTitle?, episodeTitle?, history?, question }
-// Streams a plain-text answer grounded in the episode transcript. The transcript
+// Streams an answer grounded in the episode transcript, as newline-delimited
+// JSON events: text chunks and the transcript passages they cite. The transcript
 // is prompt-cached inside anthropic.ts so follow-ups in a session stay cheap.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { ChatTurn } from '../src/types.js';
+import type { AskEvent, ChatTurn } from '../src/types.js';
 import { streamAnswer } from './_lib/anthropic.js';
 import { jsonBody, methodNotAllowed, str } from './_lib/http.js';
 import { llmGlobalPerHour, llmPerHour, rateLimit, tooMany } from './_lib/ratelimit.js';
@@ -60,24 +61,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
   if (rl && !rl.ok) return tooMany(res, rl);
 
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  // Newline-delimited JSON: text chunks and the transcript passages they cite.
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Accel-Buffering', 'no');
+  const send = (event: AskEvent) => res.write(`${JSON.stringify(event)}\n`);
 
   try {
-    await streamAnswer({
-      transcript,
-      meta,
-      history,
-      question,
-      onDelta: (text) => res.write(text),
-    });
-    res.end();
+    await streamAnswer({ transcript, meta, history, question, onEvent: send });
   } catch (err) {
-    // If nothing was written yet we can still send an error; otherwise just end.
-    if (!res.headersSent || !res.writableEnded) {
-      res.write(`\n[error: ${(err as Error).message}]`);
-    }
-    res.end();
+    if (!res.writableEnded) send({ type: 'error', message: (err as Error).message });
   }
+  res.end();
 }

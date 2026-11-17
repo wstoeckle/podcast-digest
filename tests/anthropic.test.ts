@@ -43,7 +43,7 @@ function message(content: unknown[], stop_reason = 'end_turn', model = 'claude-o
   );
 }
 
-function sse(text: string, stop_reason = 'end_turn') {
+function sse(text: string, stop_reason = 'end_turn', citations: unknown[] = []) {
   const events: [string, unknown][] = [
     [
       'message_start',
@@ -69,6 +69,10 @@ function sse(text: string, stop_reason = 'end_turn') {
       'content_block_delta',
       { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
     ],
+    ...citations.map((citation): [string, unknown] => [
+      'content_block_delta',
+      { type: 'content_block_delta', index: 0, delta: { type: 'citations_delta', citation } },
+    ]),
     ['content_block_stop', { type: 'content_block_stop', index: 0 }],
     [
       'message_delta',
@@ -139,7 +143,7 @@ describe('generateDigest', () => {
     stubFetch(() => message([{ type: 'text', text: JSON.stringify(reply) }]));
     const { generateDigest } = await load();
     const d = await generateDigest(TRANSCRIPT, {});
-    expect(d.quotes).toEqual(['The batteries got cheap, and once they got cheap']);
+    expect(d.quotes).toEqual([{ text: 'The batteries got cheap, and once they got cheap' }]);
     expect(d.outline).toEqual(reply.outline);
   });
 
@@ -201,7 +205,9 @@ describe('streamAnswer', () => {
         { role: 'assistant', content: 'Hello' },
       ],
       question: 'What got cheap?',
-      onDelta: (t) => (out += t),
+      onEvent: (e) => {
+        if (e.type === 'text') out += e.text;
+      },
     });
     expect(out).toBe('They said batteries.');
     const body = calls[0]?.body as {
@@ -211,7 +217,15 @@ describe('streamAnswer', () => {
     };
     expect(body.stream).toBe(true);
     expect(body.output_config).toEqual({ effort: 'low' });
-    expect(JSON.stringify(body.messages[0])).toContain('"cache_control":{"type":"ephemeral"}');
+    // The transcript is a citable, prompt-cached document.
+    expect(body.messages[0]?.content).toEqual([
+      expect.objectContaining({
+        type: 'document',
+        source: { type: 'text', media_type: 'text/plain', data: TRANSCRIPT },
+        citations: { enabled: true },
+        cache_control: { type: 'ephemeral' },
+      }),
+    ]);
     expect(body.messages.map((m) => m.role)).toEqual([
       'user',
       'assistant',
@@ -230,8 +244,41 @@ describe('streamAnswer', () => {
       meta: {},
       history: [],
       question: 'q',
-      onDelta: (t) => (out += t),
+      onEvent: (e) => {
+        if (e.type === 'text') out += e.text;
+      },
     });
     expect(out).toMatch(/declined/);
+  });
+
+  it('forwards citations with the time of the cited passage, markers stripped', async () => {
+    const timed = '[0:00] Host: Welcome.\n[1:05] Guest: The batteries got cheap.';
+    const at = timed.indexOf('[1:05]');
+    stubFetch(() =>
+      sse('Batteries got cheap.', 'end_turn', [
+        {
+          type: 'char_location',
+          cited_text: '[1:05] Guest: The batteries got cheap.',
+          document_index: 0,
+          document_title: 'Episode transcript',
+          start_char_index: at,
+          end_char_index: timed.length,
+        },
+      ]),
+    );
+    const { streamAnswer } = await load();
+    const events: unknown[] = [];
+    await streamAnswer({
+      transcript: timed,
+      meta: {},
+      history: [],
+      question: 'What got cheap?',
+      onEvent: (e) => events.push(e),
+    });
+    expect(events).toEqual([
+      { type: 'text', text: 'Batteries got cheap.' },
+      { type: 'cite', text: 'Guest: The batteries got cheap.', start: 65 },
+    ]);
+    expect(JSON.stringify(calls[0]?.body)).toContain('[m:ss] markers');
   });
 });

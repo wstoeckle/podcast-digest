@@ -7,6 +7,7 @@ import { addToPlaylist, inPlaylist } from '../lib/playlist';
 import DigestView from '../components/DigestView';
 import { rememberDigest, markHeard } from '../lib/listening';
 import AskChat from '../components/AskChat';
+import EpisodeAudio, { type EpisodeAudioHandle } from '../components/EpisodeAudio';
 import PasteTranscript from '../components/PasteTranscript';
 
 type Phase = 'loading' | 'transcribing' | 'summarizing' | 'ready' | 'error';
@@ -42,6 +43,8 @@ export default function Episode() {
   // the older run clobber state or surface a spurious error.
   const activeRun = useRef<{ cancelled: boolean } | null>(null);
   const mounted = useRef(true);
+  const audioRef = useRef<EpisodeAudioHandle | null>(null);
+  const seek = useCallback((seconds: number) => audioRef.current?.seek(seconds), []);
 
   const run = useCallback(
     async (opts?: { pasted?: string }) => {
@@ -219,10 +222,11 @@ export default function Episode() {
               </Link>
             )}
           </div>
-          <DigestView digest={digest} sourceLabel={sourceLabel(source)} onComplete={() => {
+          <DigestView digest={digest} sourceLabel={sourceLabel(source)} onSeek={ctx.ep.audioUrl ? seek : undefined} onComplete={() => {
             if (!digest.demo && ctx) markHeard({ guid: ctx.ep.guid, showTitle: ctx.showTitle, episodeTitle: ctx.ep.title,
               ...(ctx.feedUrl ? { feedUrl: ctx.feedUrl } : {}), tldr: digest.tldr, bullets: digest.bullets, addedAt: Date.now() });
           }} />
+          {ctx.ep.audioUrl && <EpisodeAudio ref={audioRef} src={ctx.ep.audioUrl} />}
           {(source === 'demo' || source === 'stt') && (
             <PasteTranscript
               onSubmit={usePasted}
@@ -238,6 +242,7 @@ export default function Episode() {
             guid={ctx.ep.guid}
             showTitle={ctx.showTitle}
             episodeTitle={ctx.ep.title}
+            onSeek={ctx.ep.audioUrl ? seek : undefined}
           />
         </>
       )}

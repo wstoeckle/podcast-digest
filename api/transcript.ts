@@ -9,30 +9,21 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { TranscriptResponse } from '../src/types.js';
-import { toPlainTranscript } from '../src/lib/transcriptFormats.js';
+import { toTimedTranscript } from '../src/lib/transcriptFormats.js';
 import { DEMO_TRANSCRIPT, MAX_TRANSCRIPT_CHARS } from '../src/lib/digestPrompt.js';
-import { fetchWithTimeout, jsonBody, methodNotAllowed, safeRemoteUrl, str } from './_lib/http.js';
+import { jsonBody, methodNotAllowed, safeRemoteUrl, str } from './_lib/http.js';
 import { rateLimit, sttGlobalPerHour, sttPerHour, tooMany } from './_lib/ratelimit.js';
-import { CACHE_TTL_SECONDS, redis } from './_lib/redis.js';
 import { hasStt, sttProvider } from './_lib/stt.js';
-
-const cacheKey = (guid: string) => `t:${guid}`;
+import {
+  fetchTranscriptFile,
+  getCachedTranscript as getCached,
+  putCachedTranscript as putCached,
+} from './_lib/transcripts.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET') return void (await pollJob(req, res));
   if (req.method === 'POST') return void (await startOrReturn(req, res));
   return methodNotAllowed(res, 'GET, POST');
-}
-
-async function getCached(guid: string): Promise<string | null> {
-  const kv = redis();
-  if (!kv) return null;
-  return (await kv.get<string>(cacheKey(guid))) ?? null;
-}
-
-async function putCached(guid: string, text: string): Promise<void> {
-  const kv = redis();
-  if (kv) await kv.set(cacheKey(guid), text, { ex: CACHE_TTL_SECONDS });
 }
 
 async function startOrReturn(req: VercelRequest, res: VercelResponse) {
@@ -51,7 +42,8 @@ async function startOrReturn(req: VercelRequest, res: VercelResponse) {
   // Redis (the model input is clamped again in anthropic.ts regardless).
   const pasted = str(body.transcript)?.slice(0, MAX_TRANSCRIPT_CHARS * 2);
   if (pasted) {
-    const text = toPlainTranscript(pasted).slice(0, MAX_TRANSCRIPT_CHARS);
+    // Keeps timestamps when the pasted text has them, so the outline can link into the audio.
+    const text = toTimedTranscript(pasted).slice(0, MAX_TRANSCRIPT_CHARS);
     if (text.length < 40) {
       res.status(400).json({
         status: 'error',
@@ -156,18 +148,5 @@ async function pollJob(req: VercelRequest, res: VercelResponse) {
     res
       .status(502)
       .json({ status: 'error', error: (err as Error).message } satisfies TranscriptResponse);
-  }
-}
-
-async function fetchTranscriptFile(url: string, type?: string): Promise<string | null> {
-  try {
-    const r = await fetchWithTimeout(url, 15000);
-    if (!r.ok) return null;
-    const raw = await r.text();
-    const ct = type ?? r.headers.get('content-type') ?? undefined;
-    const text = toPlainTranscript(raw, ct).slice(0, MAX_TRANSCRIPT_CHARS);
-    return text.length > 40 ? text : null;
-  } catch {
-    return null;
   }
 }
