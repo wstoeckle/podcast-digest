@@ -15,13 +15,18 @@ listen to** in a fraction of the runtime.
   outline, and short quotes (shown only if they appear word for word in the
   transcript), grounded
   strictly in the transcript.
+- **Jump into the audio**: when the transcript has times, outline segments and
+  quotes carry a timestamp that plays the episode from there.
 - **Ask**: streamed follow-up Q&A over the same transcript (prompt-cached).
+  Each answer shows the exact transcript lines it's based on, with their times.
 - **Listen**: on-device speech synthesis reads the digest aloud — offline, no
   key — at 0.5×–2× speed.
 - **Listen queue**: stack digests and play them back to back — a 30-minute walk
   fits five or six. Queue items embed their text, so playback works offline.
 - **Bring your shows**: import your subscriptions via OPML (Pocket Casts:
   Profile → Settings → Export Podcasts; most podcast apps export the same file).
+- **Overnight digests** (opt-in): new episodes of the shows you follow are
+  digested each night at half price, so they're waiting when you open the app.
 - **Installable PWA**, iPhone-first. Your library, follows, and queue live in
   `localStorage` — no account.
 
@@ -53,6 +58,8 @@ All optional (see `.env.example`). Set them in your Vercel project (or
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Caching transcripts + digests, **and per-IP rate limiting** on the paid endpoints. |
 | `RL_LLM_PER_HOUR` / `RL_STT_PER_HOUR` (optional) | Per-IP hourly caps for digest+Q&A / new transcriptions. Defaults 40 / 15. |
 | `RL_LLM_GLOBAL_PER_HOUR` / `RL_STT_GLOBAL_PER_HOUR` (optional) | Whole-deployment hourly ceilings across all callers combined. Defaults 150 / 30. |
+| `CRON_SECRET`                                     | Turns on the nightly overnight-digest run (Vercel Cron sends it). Any long random string. |
+| `OVERNIGHT_MAX_EPISODES` / `OVERNIGHT_MAX_TRANSCRIBE` (optional) | Per-night caps: episodes digested, and how many of those may be transcribed from audio. Defaults 8 / 4 (`0` = published transcripts only). |
 
 ### Protecting your keys on a public URL
 
@@ -71,6 +78,23 @@ finds the URL could run up your bill. Two mitigations ship here:
 
 For a fully private app, also enable Vercel's Deployment Protection (password /
 SSO), which gates the site at the edge before any function runs.
+
+## Overnight digests
+
+Turn them on from the home page. Each night (09:00 UTC, set in `vercel.json`)
+the server checks the shows you follow for episodes published since the last
+run, gets their transcripts (published ones first, then AssemblyAI up to the
+cap), and submits one Message Batch of digests at half price. When you next
+open the app, finished digests are collected and listed under **New overnight**;
+opening one is instant and costs nothing more.
+
+Needs Upstash Redis, `ANTHROPIC_API_KEY`, and `CRON_SECRET`. To try it without
+waiting for the night, use **Run** on the cron job in the Vercel dashboard
+(Settings → Cron Jobs).
+
+Cost with the default caps is bounded: at most 8 digests a night at batch
+prices (roughly half the per-digest cost above), plus up to 4 AssemblyAI
+transcriptions.
 
 ## Deploy
 
