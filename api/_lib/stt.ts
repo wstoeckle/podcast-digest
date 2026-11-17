@@ -4,6 +4,7 @@
 // later behind the same interface.
 
 import type { TranscriptStatus } from '../../src/types.js';
+import { formatTimed, type Cue } from '../../src/lib/timed.js';
 
 export interface SttProvider {
   /** Kick off a transcription of a remote audio URL; returns a job id. */
@@ -36,11 +37,12 @@ class AssemblyAI implements SttProvider {
       headers: { authorization: this.key },
     });
     if (!res.ok) throw new Error(`AssemblyAI poll failed: ${res.status}`);
-    const data = (await res.json()) as { status?: string; text?: string; error?: string };
+    const data = (await res.json()) as AaiTranscript;
     switch (data.status) {
       case 'completed': {
         const out: { status: TranscriptStatus; text?: string } = { status: 'ready' };
-        if (data.text) out.text = data.text;
+        const text = assemblyAiText(data);
+        if (text) out.text = text;
         return out;
       }
       case 'error': {
@@ -52,6 +54,68 @@ class AssemblyAI implements SttProvider {
         return { status: 'processing' };
     }
   }
+}
+
+interface AaiWord {
+  text?: string;
+  start?: number;
+}
+interface AaiUtterance {
+  speaker?: string;
+  start?: number;
+  text?: string;
+  words?: AaiWord[];
+}
+export interface AaiTranscript {
+  status?: string;
+  text?: string;
+  error?: string;
+  utterances?: AaiUtterance[] | null;
+  words?: AaiWord[] | null;
+}
+
+/**
+ * Timed text from an AssemblyAI result: speaker turns (speaker_labels is on)
+ * split into sentences with their start times, so the transcript carries
+ * `[m:ss] Speaker A: …` paragraphs. Falls back to the flat text.
+ */
+export function assemblyAiText(data: AaiTranscript): string | undefined {
+  const cues: Cue[] = [];
+  const turns: AaiUtterance[] = data.utterances?.length
+    ? data.utterances
+    : data.words?.length
+      ? [{ words: data.words }]
+      : [];
+  for (const turn of turns) {
+    const speaker = turn.speaker ? `Speaker ${turn.speaker}` : undefined;
+    const words = turn.words ?? [];
+    if (!words.length) {
+      if (turn.text && typeof turn.start === 'number') {
+        cues.push(withSpeaker({ start: turn.start / 1000, text: turn.text }, speaker));
+      }
+      continue;
+    }
+    let start: number | undefined;
+    let parts: string[] = [];
+    for (const w of words) {
+      if (!w.text) continue;
+      if (start === undefined && typeof w.start === 'number') start = w.start / 1000;
+      parts.push(w.text);
+      if (/[.!?]["')\]]*$/.test(w.text) && start !== undefined) {
+        cues.push(withSpeaker({ start, text: parts.join(' ') }, speaker));
+        start = undefined;
+        parts = [];
+      }
+    }
+    if (parts.length && start !== undefined) {
+      cues.push(withSpeaker({ start, text: parts.join(' ') }, speaker));
+    }
+  }
+  return cues.length >= 2 ? formatTimed(cues) : data.text || undefined;
+}
+
+function withSpeaker(cue: Cue, speaker: string | undefined): Cue {
+  return speaker ? { ...cue, speaker } : cue;
 }
 
 async function safeText(res: Response): Promise<string> {

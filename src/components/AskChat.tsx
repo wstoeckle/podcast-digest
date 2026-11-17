@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import type { ChatTurn } from '../types';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import type { ChatTurn, Citation } from '../types';
 import { streamAsk } from '../net/api';
+import { applyAskEvent, type AnswerTurn as Turn } from '../lib/askAnswer';
+import TimeChip from './TimeChip';
 
 const SUGGESTIONS = [
   'What were the main takeaways?',
@@ -13,13 +15,15 @@ export default function AskChat({
   guid,
   showTitle,
   episodeTitle,
+  onSeek,
 }: {
   transcript: string;
   guid: string;
   showTitle: string;
   episodeTitle: string;
+  onSeek?: ((seconds: number) => void) | undefined;
 }) {
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -37,8 +41,9 @@ export default function AskChat({
     if (!q || busy) return;
     setError('');
     setInput('');
-    const history = turns;
-    setTurns([...history, { role: 'user', content: q }, { role: 'assistant', content: '' }]);
+    // The API gets plain text history; markers and passages stay in the UI.
+    const history: ChatTurn[] = turns.map(({ role, content }) => ({ role, content }));
+    setTurns([...turns, { role: 'user', content: q }, { role: 'assistant', content: '' }]);
     setBusy(true);
 
     const ctrl = new AbortController();
@@ -46,15 +51,17 @@ export default function AskChat({
     try {
       await streamAsk(
         { transcript, guid, showTitle, episodeTitle, history, question: q },
-        (delta) =>
+        (event) => {
+          if (event.type === 'error') {
+            setError(event.message);
+            return;
+          }
           setTurns((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last && last.role === 'assistant') {
-              next[next.length - 1] = { role: 'assistant', content: last.content + delta };
-            }
-            return next;
-          }),
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'assistant') return prev;
+            return [...prev.slice(0, -1), applyAskEvent(last, event)];
+          });
+        },
         ctrl.signal,
       );
     } catch (err) {
@@ -83,7 +90,12 @@ export default function AskChat({
         <div className="chat">
           {turns.map((t, i) => (
             <div key={i} className={`msg ${t.role}`}>
-              {t.content || (busy && i === turns.length - 1 ? <span className="muted">…</span> : '')}
+              {t.content ? (
+                <AnswerText turn={t} />
+              ) : busy && i === turns.length - 1 ? (
+                <span className="muted">…</span>
+              ) : null}
+              {t.cites && t.cites.length > 0 && <Sources cites={t.cites} onSeek={onSeek} />}
             </div>
           ))}
           <div ref={endRef} />
@@ -111,5 +123,49 @@ export default function AskChat({
         </button>
       </form>
     </section>
+  );
+}
+
+function AnswerText({ turn }: { turn: Turn }) {
+  if (!turn.parts) return <>{turn.content}</>;
+  return (
+    <>
+      {turn.parts.map((p, i) =>
+        'text' in p ? (
+          <Fragment key={i}>{p.text}</Fragment>
+        ) : (
+          <sup key={i} className="cite-mark" aria-label={`source ${p.cite}`}>
+            {p.cite}
+          </sup>
+        ),
+      )}
+    </>
+  );
+}
+
+function Sources({
+  cites,
+  onSeek,
+}: {
+  cites: Citation[];
+  onSeek?: ((seconds: number) => void) | undefined;
+}) {
+  return (
+    <div className="sources">
+      <div className="sources-h">From the transcript</div>
+      <ol>
+        {cites.map((c, i) => (
+          <li key={i}>
+            <span className="cite-num" aria-hidden>
+              {i + 1}
+            </span>
+            <div>
+              <blockquote>{c.text}</blockquote>
+              {c.start !== undefined && <TimeChip seconds={c.start} onSeek={onSeek} />}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }

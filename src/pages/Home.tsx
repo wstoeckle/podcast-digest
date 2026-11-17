@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { SearchResultShow } from '../types';
-import { resolveLink, searchShows } from '../net/api';
+import { resolveLink, searchShows, syncOvernight } from '../net/api';
 import { readLibrary, removeFromLibrary, type LibraryItem } from '../lib/library';
 import { importFollowing, readFollowing, unfollowShow, type FollowedShow } from '../lib/following';
 import { parseOpml } from '../lib/opml';
 import { hashId } from '../lib/rss';
 import { formatDate } from '../lib/format';
+import { isOvernightOn } from '../lib/overnight';
+import OvernightPanel from '../components/OvernightPanel';
 
 type Mode = 'search' | 'paste';
 
@@ -52,6 +54,8 @@ export default function Home() {
   function unfollow(feedUrl: string) {
     unfollowShow(feedUrl);
     setFollowing(readFollowing());
+    if (isOvernightOn())
+      void syncOvernight({ action: 'remove', feedUrls: [feedUrl] }).catch(() => {});
   }
 
   async function submit(e: React.FormEvent) {
@@ -176,6 +180,8 @@ export default function Home() {
           </div>
         </section>
       )}
+
+      <OvernightPanel following={following} />
 
       <section>
         <h2 className="section-title">Shows you follow</h2>

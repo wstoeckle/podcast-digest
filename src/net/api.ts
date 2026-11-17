@@ -1,12 +1,14 @@
 // The only browser module that talks to our /api endpoints.
 
 import type {
+  AskEvent,
   Digest,
   FeedResult,
   ResolveResult,
   SearchResultShow,
   TranscriptResponse,
   ChatTurn,
+  OvernightStatus,
 } from '../types';
 
 async function getJson<T>(url: string): Promise<T> {
@@ -84,10 +86,13 @@ export interface AskInput {
   question: string;
 }
 
-/** Stream an answer; calls onDelta for each chunk. Resolves when complete. */
+/**
+ * Stream an answer. The response is newline-delimited JSON (AskEvent): text
+ * chunks, and the transcript passages they cite. Resolves when complete.
+ */
 export async function streamAsk(
   input: AskInput,
-  onDelta: (text: string) => void,
+  onEvent: (event: AskEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch('/api/ask', {
@@ -101,13 +106,42 @@ export async function streamAsk(
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  let buffer = '';
+  const emit = (line: string) => {
+    if (!line.trim()) return;
+    try {
+      onEvent(JSON.parse(line) as AskEvent);
+    } catch {
+      /* a malformed line is skipped rather than ending the answer */
+    }
+  };
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
-    if (value) onDelta(decoder.decode(value, { stream: true }));
+    buffer += decoder.decode(value, { stream: true });
+    let nl = buffer.indexOf('\n');
+    while (nl >= 0) {
+      emit(buffer.slice(0, nl));
+      buffer = buffer.slice(nl + 1);
+      nl = buffer.indexOf('\n');
+    }
   }
+  emit(buffer + decoder.decode());
 }
 
 export function recommendDigests(input: import('../lib/listening').RecommendationInput): Promise<import('../lib/listening').RecommendationResult> {
   return postJson('/api/recommend', input);
+}
+
+export function getOvernight(): Promise<OvernightStatus> {
+  return getJson('/api/overnight');
+}
+
+export type OvernightSync =
+  | { action: 'add'; shows: { feedUrl: string; title: string; artwork?: string }[] }
+  | { action: 'remove'; feedUrls: string[] }
+  | { action: 'clear' };
+
+export function syncOvernight(body: OvernightSync): Promise<OvernightStatus> {
+  return postJson('/api/overnight', body);
 }

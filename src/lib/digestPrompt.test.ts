@@ -6,7 +6,8 @@ import {
   digestUserText,
   demoDigest,
   askSystem,
-  keepVerbatimQuotes,
+  groundDigest,
+  groundQuotes,
   normalizeForMatch,
   parseDigestResponse,
 } from './digestPrompt';
@@ -21,7 +22,7 @@ describe('DIGEST_SCHEMA', () => {
   it('makes outline items strict objects (structured outputs needs this)', () => {
     const item = DIGEST_SCHEMA.properties.outline.items;
     expect(item.additionalProperties).toBe(false);
-    expect(item.required).toEqual(['title', 'summary']);
+    expect(item.required).toEqual(['title', 'summary', 'start']);
   });
 });
 
@@ -57,34 +58,44 @@ describe('digestUserText', () => {
   });
 });
 
-describe('keepVerbatimQuotes', () => {
+describe('groundQuotes', () => {
   const transcript =
     'Host: So what changed? Guest: Honestly, the batteries got cheap — and once they got cheap, everything else followed. Host: Wow.';
 
   it('keeps a quote that appears word for word, ignoring case and punctuation', () => {
     const q = '"The batteries got cheap, and once they got cheap, everything else followed."';
-    expect(keepVerbatimQuotes([q], transcript)).toEqual([
-      'The batteries got cheap, and once they got cheap, everything else followed.',
+    expect(groundQuotes([q], transcript)).toEqual([
+      { text: 'The batteries got cheap, and once they got cheap, everything else followed.' },
     ]);
   });
 
   it('drops paraphrases and invented lines', () => {
     expect(
-      keepVerbatimQuotes(['Batteries became cheap and then everything followed'], transcript),
+      groundQuotes(['Batteries became cheap and then everything followed'], transcript),
     ).toEqual([]);
   });
 
   it('matches whole words only', () => {
-    expect(keepVerbatimQuotes(['atteries got cheap and once'], transcript)).toEqual([]);
+    expect(groundQuotes(['atteries got cheap and once'], transcript)).toEqual([]);
   });
 
   it('drops fragments under four words and duplicates, and caps the count', () => {
     const ok = 'the batteries got cheap';
-    expect(keepVerbatimQuotes(['got cheap', ok, ok.toUpperCase()], transcript)).toEqual([ok]);
+    expect(groundQuotes(['got cheap', ok, ok.toUpperCase()], transcript)).toEqual([{ text: ok }]);
     const many = Array(6)
       .fill(0)
       .map((_, i) => `word${i} a b c`);
-    expect(keepVerbatimQuotes(many, many.join(' . '), 4)).toHaveLength(4);
+    expect(groundQuotes(many, many.join(' . '), 4)).toHaveLength(4);
+  });
+
+  it('attaches the time of the paragraph a quote starts in, across markers', () => {
+    const timed =
+      '[0:00] Host: Welcome back.\n[1:05] Guest: The batteries got cheap.\n[1:40] And then everything followed.';
+    expect(groundQuotes(['The batteries got cheap. And then everything followed.'], timed)).toEqual(
+      [{ text: 'The batteries got cheap. And then everything followed.', start: 65 }],
+    );
+    // A marker is never part of a quote.
+    expect(groundQuotes(['1 05 Guest the batteries'], timed)).toEqual([]);
   });
 
   it('normalizes accents and dashes', () => {
@@ -134,7 +145,29 @@ describe('parseDigestResponse', () => {
       }),
     );
     expect(d.outline).toEqual([{ title: 'Intro', summary: 'Hi.' }]);
-    expect(d.quotes).toEqual(['a real line here']);
+    expect(d.quotes).toEqual([{ text: 'a real line here' }]);
+  });
+
+  it('parses outline start times and drops ones outside the transcript', () => {
+    const d = parseDigestResponse(
+      JSON.stringify({
+        tldr: 't',
+        bullets: ['a'],
+        topics: [],
+        outline: [
+          { title: 'Intro', summary: 's', start: '0:00' },
+          { title: 'Middle', summary: 's', start: '12:34' },
+          { title: 'Made up', summary: 's', start: '3:00:00' },
+          { title: 'No time', summary: 's', start: '' },
+        ],
+        quotes: [],
+      }),
+    );
+    expect(d.outline?.map((o) => o.start)).toEqual([0, 754, 10800, undefined]);
+    const grounded = groundDigest(d, '[0:00] hello there.\n[12:34] middle bit.\n[45:00] the end.');
+    expect(grounded.outline?.map((o) => o.start)).toEqual([0, 754, undefined, undefined]);
+    // Untimed transcript: no times survive.
+    expect(groundDigest(d, 'plain text').outline?.every((o) => o.start === undefined)).toBe(true);
   });
 
   it('accepts older replies without outline or quotes', () => {
@@ -164,6 +197,11 @@ describe('demoDigest', () => {
 
   it('only quotes lines the demo transcript actually contains', () => {
     const d = demoDigest({});
-    expect(keepVerbatimQuotes(d.quotes ?? [], DEMO_TRANSCRIPT)).toEqual(d.quotes);
+    const grounded = groundQuotes(
+      (d.quotes ?? []).map((q) => q.text),
+      DEMO_TRANSCRIPT,
+    );
+    expect(grounded).toEqual(d.quotes);
+    expect(groundDigest(d, DEMO_TRANSCRIPT).outline).toEqual(d.outline);
   });
 });

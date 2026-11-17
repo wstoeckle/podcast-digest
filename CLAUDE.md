@@ -52,6 +52,8 @@ Both themes ship; the app follows `prefers-color-scheme` and a manual toggle.
 - Respect `prefers-reduced-motion` (the Listen player highlights sentences;
   disable the scroll-follow when reduced motion is set).
 - **No accounts, no gates.** The library is personal and lives in `localStorage`.
+  The one exception is opt-in: turning on overnight digests shares the list of
+  followed shows with the server (it has to know what to check). Off by default.
 - No dark patterns, no fake urgency.
 
 ### Voice
@@ -76,17 +78,35 @@ paste a link ────┴─▶ resolve ─▶ RSS feed ─▶ pick episode
                        transcript ◀── a transcript you paste in  (free, instant, wins)
                                   ◀── RSS <podcast:transcript>  (free, instant)
                                   ◀── AssemblyAI STT of the audio URL  (fallback)
+                       (kept as timed text: `[m:ss]` paragraph markers when the source has times)
                                                  │
                   Claude digest (TLDR + key points + topics + outline + quotes)
                                                  │
-                              read it · ask follow-ups (streamed) · listen (on-device TTS)
+     read it · ask follow-ups (streamed, cited) · listen (on-device TTS) · jump into the audio
+
+followed shows ─▶ nightly cron ─▶ new episodes ─▶ transcripts ─▶ Message Batch (½ price)
+                                  app open ─▶ collect finished batch ─▶ "New overnight"
 ```
+
+### Timed transcripts
+
+A transcript is one string. When the source has timing (VTT, SRT, Podcasting
+2.0 JSON, AssemblyAI, pasted text with timestamps), paragraphs start with a
+`[m:ss]` / `[h:mm:ss]` marker (`src/lib/timed.ts`). Everything downstream reads
+the times back out: the digest's outline starts (the model copies the marker;
+the server drops times outside the transcript), quote times (located by
+matching), and citation times (the cited character offset → the marker before
+it). Untimed transcripts work exactly as before, just without time chips.
+Timestamps come from the transcript, so on shows with dynamically inserted ads
+a jump can land a little off.
 
 ### Where things live
 
 - `src/lib/*` — **pure, unit-tested** logic shared by the browser and the API:
-  `rss.ts` (feed parsing), `transcriptFormats.ts` (VTT/SRT/JSON → text),
-  `resolveUrl.ts` (link normalization), `digestPrompt.ts` (prompt + schema).
+  `rss.ts` (feed parsing), `transcriptFormats.ts` (VTT/SRT/JSON → text, plain
+  or timed), `timed.ts` (time markers), `resolveUrl.ts` (link normalization),
+  `digestPrompt.ts` (prompt + schema + grounding), `askAnswer.ts` (folding the
+  cited answer stream into text + markers).
   These have **no** DOM or Node dependencies so they run in tests, the browser,
   and serverless functions alike.
 - `src/net/api.ts` — the **only** browser module that calls `fetch`.
@@ -98,8 +118,12 @@ paste a link ────┴─▶ resolve ─▶ RSS feed ─▶ pick episode
 - `src/lib/tts.ts` + `src/components/ListenPlayer.tsx` — on-device read-aloud
   (0.5×–2×, speed persisted). `src/pages/Playlist.tsx` chains queue items
   back-to-back via the speaker's `onComplete`.
+- `src/components/EpisodeAudio.tsx` — the episode's own audio; time chips
+  (`TimeChip.tsx`) call its `seek()`, and it docks to the bottom once playing.
 - `api/*.ts` — serverless endpoints (see below). `api/_lib/*` — `redis`,
-  `anthropic`, `stt` helpers.
+  `anthropic`, `stt`, `transcripts` helpers, and `overnight.ts` (the overnight
+  pipeline; every outside call goes through injected deps, so it's tested
+  against fakes).
 
 ### API endpoints
 
@@ -109,8 +133,9 @@ paste a link ────┴─▶ resolve ─▶ RSS feed ─▶ pick episode
 | `GET /api/feed?url=`      | Fetch + parse an RSS feed → show + episodes (avoids browser CORS).   |
 | `POST /api/resolve`       | Normalize a pasted URL → `{ feedUrl, guid? }`.                       |
 | `POST /api/transcript`    | Pasted transcript → cache-first → RSS transcript → submit STT job. `GET` polls it. |
-| `POST /api/digest`        | Cached transcript → Claude → `{ tldr, bullets, topics }`.            |
-| `POST /api/ask`           | Streamed Claude answer over the transcript (prompt-cached).          |
+| `POST /api/digest`        | Cached transcript → Claude → `{ tldr, bullets, topics, outline, quotes }`. |
+| `POST /api/ask`           | Streamed answer as NDJSON `AskEvent`s: text + cited transcript passages. |
+| `GET/POST /api/overnight` | Overnight digests: status + collect (GET), follow-list sync (POST), nightly run (GET from Vercel Cron with `CRON_SECRET`). |
 
 ### Graceful degradation ("demo mode")
 
@@ -145,13 +170,18 @@ Add real keys to light up real episodes.
   `temperature` — current models reject them. `max_tokens` must leave room for
   thinking. Read replies by block `type`, never `content[0]`.
 - Digest uses **structured outputs** (`output_config.format` with
-  `DIGEST_SCHEMA`). Bump `PROMPT_VERSION` in `api/digest.ts` when the prompt
+  `DIGEST_SCHEMA`). Bump `PROMPT_VERSION` in `src/lib/digestPrompt.ts` when the prompt
   or schema changes.
 - **Refusals**: safety classifiers can decline (HTTP 200, `stop_reason:
   "refusal"`). Requests opt into server-side `fallbacks: "default"` where the
   model supports it; always check `stop_reason` before using the reply.
 - Quotes are kept only if they appear **word for word** in the transcript
-  (`keepVerbatimQuotes`) — never show a line nobody said.
+  (`groundQuotes`) — never show a line nobody said.
+- Q&A sends the transcript as a **citations-enabled document**; answers stream
+  with `citations_delta` passages. Citations and structured outputs can't be
+  combined, so never add `output_config.format` to the ask request.
+- Overnight digests use the **Message Batches API** (half price). Batches don't
+  take `fallbacks`; a declined overnight digest is just made live later.
 - The **transcript is prompt-cached** (`cache_control`) so repeat Q&A over the
   same episode is cheap. Q&A is **streamed** to the client.
 - The system prompt forbids inventing anything not supported by the transcript.
@@ -162,7 +192,9 @@ Add real keys to light up real episodes.
 - Vitest. The pure `src/lib/*` parsers carry the coverage (RSS shapes, transcript
   formats, URL resolution). Fixtures live beside the tests.
 - `tests/anthropic.test.ts` stubs `fetch` and asserts the exact Claude request
-  bodies (model, effort, schema, fallbacks) — no key, no spend.
+  bodies (model, effort, schema, fallbacks, citations) — no key, no spend.
+- `tests/overnight.test.ts` runs whole nights against an in-memory store and
+  fake feeds/STT/batches.
 - `npm run typecheck` covers `api/` too (`tsconfig.api.json`).
 
 ### Commits

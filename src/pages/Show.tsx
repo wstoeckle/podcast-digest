@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { FeedResult } from '../types';
-import { fetchFeed } from '../net/api';
+import { fetchFeed, syncOvernight } from '../net/api';
 import { isFollowing, toggleFollow } from '../lib/following';
+import { isOvernightOn } from '../lib/overnight';
 import { formatDate, formatDuration } from '../lib/format';
 
 export default function Show() {
@@ -15,13 +16,19 @@ export default function Show() {
 
   function onToggleFollow() {
     if (!data) return;
-    setFollowed(
-      toggleFollow({
-        feedUrl,
-        title: data.show.title,
-        ...(data.show.artwork ? { artwork: data.show.artwork } : {}),
-      }),
-    );
+    const show = {
+      feedUrl,
+      title: data.show.title,
+      ...(data.show.artwork ? { artwork: data.show.artwork } : {}),
+    };
+    const now = toggleFollow(show);
+    setFollowed(now);
+    // Keep the server's list in step when overnight digests are on.
+    if (isOvernightOn()) {
+      void syncOvernight(
+        now ? { action: 'add', shows: [show] } : { action: 'remove', feedUrls: [feedUrl] },
+      ).catch(() => {});
+    }
   }
 
   useEffect(() => setFollowed(isFollowing(feedUrl)), [feedUrl]);
