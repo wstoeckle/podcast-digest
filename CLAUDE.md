@@ -3,8 +3,8 @@
 A phone-installable PWA that turns a single podcast episode into something you
 can **read, question, and listen to** in a fraction of the runtime. Search any
 show (or paste a Pocket Casts / Apple / Spotify / RSS link), pick an episode, and get a
-Claude-written TLDR + key points, a follow-up Q&A chat, and an on-device
-read-aloud player.
+Claude-written TLDR, key points, outline, and verified quotes, a follow-up Q&A
+chat, and an on-device read-aloud player.
 
 ---
 
@@ -77,7 +77,7 @@ paste a link ────┴─▶ resolve ─▶ RSS feed ─▶ pick episode
                                   ◀── RSS <podcast:transcript>  (free, instant)
                                   ◀── AssemblyAI STT of the audio URL  (fallback)
                                                  │
-                                    Claude digest (TLDR + key points + topics)
+                  Claude digest (TLDR + key points + topics + outline + quotes)
                                                  │
                               read it · ask follow-ups (streamed) · listen (on-device TTS)
 ```
@@ -136,16 +136,34 @@ Add real keys to light up real episodes.
 - `src/net/` is the only place that touches `fetch`.
 
 ### Claude usage (`api/_lib/anthropic.ts`)
-- Official `@anthropic-ai/sdk`. Model from `DIGEST_MODEL` env, default
-  `claude-opus-4-8`.
-- Digest uses structured outputs (`output_config.format`).
+- Official `@anthropic-ai/sdk` (1.x, API version `2026-10-21`). Model from
+  `DIGEST_MODEL` env, default `claude-opus-5-5`. Model rules (which models take
+  `effort` and `fallbacks`) live in `api/_lib/claudeConfig.ts`, unit-tested.
+- **Thinking is always on** for current models; `output_config.effort` is the
+  cost/latency dial (digest `medium`, Q&A `low`; `DIGEST_EFFORT` / `ASK_EFFORT`
+  override). Never send `thinking: {type: "disabled"}`, a `budget_tokens`, or
+  `temperature` — current models reject them. `max_tokens` must leave room for
+  thinking. Read replies by block `type`, never `content[0]`.
+- Digest uses **structured outputs** (`output_config.format` with
+  `DIGEST_SCHEMA`). Bump `PROMPT_VERSION` in `api/digest.ts` when the prompt
+  or schema changes.
+- **Refusals**: safety classifiers can decline (HTTP 200, `stop_reason:
+  "refusal"`). Requests opt into server-side `fallbacks: "default"` where the
+  model supports it; always check `stop_reason` before using the reply.
+- Quotes are kept only if they appear **word for word** in the transcript
+  (`keepVerbatimQuotes`) — never show a line nobody said.
 - The **transcript is prompt-cached** (`cache_control`) so repeat Q&A over the
   same episode is cheap. Q&A is **streamed** to the client.
 - The system prompt forbids inventing anything not supported by the transcript.
+- Each call logs one `claude_usage` JSON line (tokens, cache hits) for the
+  Vercel logs.
 
 ### Testing
 - Vitest. The pure `src/lib/*` parsers carry the coverage (RSS shapes, transcript
   formats, URL resolution). Fixtures live beside the tests.
+- `tests/anthropic.test.ts` stubs `fetch` and asserts the exact Claude request
+  bodies (model, effort, schema, fallbacks) — no key, no spend.
+- `npm run typecheck` covers `api/` too (`tsconfig.api.json`).
 
 ### Commits
 - Conventional commits; commit after each meaningful step.
