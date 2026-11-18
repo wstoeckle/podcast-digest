@@ -117,6 +117,13 @@ export interface OvernightItem {
   digestedAt: number;
 }
 
+/** A show picked for overnight digests. */
+export interface OvernightShow {
+  feedUrl: string;
+  title: string;
+  artwork?: string;
+}
+
 /** GET /api/overnight. */
 export interface OvernightStatus {
   /** False when the server lacks what overnight digests need (reason says what). */
@@ -126,6 +133,8 @@ export interface OvernightStatus {
   scheduled: boolean;
   /** Shows the server checks each night. */
   following: number;
+  /** The shows picked for overnight digests (the server keeps the list). */
+  shows: OvernightShow[];
   /** Episodes being transcribed or digested right now. */
   pending: number;
   /** epoch ms of the last nightly run. */

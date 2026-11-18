@@ -217,6 +217,11 @@ describe('runOvernight', () => {
 
     const status = await overnightStatus(h.store, { scheduled: true, now: NOW });
     expect(status).toMatchObject({ available: true, following: 2, pending: 0 });
+    // The picked shows come back, A–Z, so the picker can show them.
+    expect(status.shows).toEqual([
+      { feedUrl: 'https://f.test/A', title: 'A' },
+      { feedUrl: 'https://f.test/B', title: 'B' },
+    ]);
     expect(status.items.map((i) => i.guid).sort()).toEqual(['a1', 'b1']);
     expect(status.items[0]).toMatchObject({
       tldr: 'A TLDR.',

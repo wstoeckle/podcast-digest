@@ -12,7 +12,13 @@
 //                   check transcriptions once → submit a batch for ready ones
 
 import { createHash } from 'node:crypto';
-import type { Digest, FeedResult, OvernightItem, OvernightStatus } from '../../src/types.js';
+import type {
+  Digest,
+  FeedResult,
+  OvernightItem,
+  OvernightShow,
+  OvernightStatus,
+} from '../../src/types.js';
 import {
   MAX_TRANSCRIPT_CHARS,
   groundDigest,
@@ -166,10 +172,16 @@ export async function overnightStatus(
     store.smembers(KEYS.pending),
     store.get<number>(KEYS.lastRun),
   ]);
+  const shows: OvernightShow[] = Object.entries(feeds)
+    .map(([feedUrl, f]) =>
+      f.artwork ? { feedUrl, title: f.title, artwork: f.artwork } : { feedUrl, title: f.title },
+    )
+    .sort((a, b) => a.title.localeCompare(b.title));
   return {
     available: true,
     scheduled: opts.scheduled,
-    following: Object.keys(feeds).length,
+    following: shows.length,
+    shows,
     pending: pending.length,
     ...(lastRun ? { lastRunAt: lastRun } : {}),
     items: items.filter((i) => opts.now - i.digestedAt < 7 * DAY),

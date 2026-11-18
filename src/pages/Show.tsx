@@ -23,11 +23,10 @@ export default function Show() {
     };
     const now = toggleFollow(show);
     setFollowed(now);
-    // Keep the server's list in step when overnight digests are on.
-    if (isOvernightOn()) {
-      void syncOvernight(
-        now ? { action: 'add', shows: [show] } : { action: 'remove', feedUrls: [feedUrl] },
-      ).catch(() => {});
+    // Unfollowing also drops the show from overnight digests. (Following doesn't
+    // add it: you pick overnight shows yourself, on the home page.)
+    if (!now && isOvernightOn()) {
+      void syncOvernight({ action: 'remove', feedUrls: [feedUrl] }).catch(() => {});
     }
   }
 

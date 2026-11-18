@@ -42,6 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : 'Overnight digests need an ANTHROPIC_API_KEY on the server.',
       scheduled: false,
       following: 0,
+      shows: [],
       pending: 0,
       items: [],
     } satisfies OvernightStatus);

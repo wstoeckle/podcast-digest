@@ -52,8 +52,9 @@ Both themes ship; the app follows `prefers-color-scheme` and a manual toggle.
 - Respect `prefers-reduced-motion` (the Listen player highlights sentences;
   disable the scroll-follow when reduced motion is set).
 - **No accounts, no gates.** The library is personal and lives in `localStorage`.
-  The one exception is opt-in: turning on overnight digests shares the list of
-  followed shows with the server (it has to know what to check). Off by default.
+  The one exception is opt-in: overnight digests share the shows you *pick*
+  for them with the server (it has to know what to check). Following a show
+  never shares it. Off by default.
 - No dark patterns, no fake urgency.
 
 ### Voice
@@ -84,7 +85,7 @@ paste a link ────┴─▶ resolve ─▶ RSS feed ─▶ pick episode
                                                  │
      read it · ask follow-ups (streamed, cited) · listen (on-device TTS) · jump into the audio
 
-followed shows ─▶ nightly cron ─▶ new episodes ─▶ transcripts ─▶ Message Batch (½ price)
+picked shows ──▶ nightly cron ─▶ new episodes ─▶ transcripts ─▶ Message Batch (½ price, OVERNIGHT_MODEL)
                                   app open ─▶ collect finished batch ─▶ "New overnight"
 ```
 
@@ -135,7 +136,7 @@ a jump can land a little off.
 | `POST /api/transcript`    | Pasted transcript → cache-first → RSS transcript → submit STT job. `GET` polls it. |
 | `POST /api/digest`        | Cached transcript → Claude → `{ tldr, bullets, topics, outline, quotes }`. |
 | `POST /api/ask`           | Streamed answer as NDJSON `AskEvent`s: text + cited transcript passages. |
-| `GET/POST /api/overnight` | Overnight digests: status + collect (GET), follow-list sync (POST), nightly run (GET from Vercel Cron with `CRON_SECRET`). |
+| `GET/POST /api/overnight` | Overnight digests: status + picked shows + collect (GET), add/remove picked shows (POST), nightly run (GET from Vercel Cron with `CRON_SECRET`). |
 
 ### Graceful degradation ("demo mode")
 
@@ -180,8 +181,10 @@ Add real keys to light up real episodes.
 - Q&A sends the transcript as a **citations-enabled document**; answers stream
   with `citations_delta` passages. Citations and structured outputs can't be
   combined, so never add `output_config.format` to the ask request.
-- Overnight digests use the **Message Batches API** (half price). Batches don't
-  take `fallbacks`; a declined overnight digest is just made live later.
+- Overnight digests use the **Message Batches API** (half price) on
+  `OVERNIGHT_MODEL` (default `claude-haiku-5-5`), separate from the live
+  `DIGEST_MODEL`. Batches don't take `fallbacks`; a declined overnight digest is
+  just made live later.
 - The **transcript is prompt-cached** (`cache_control`) so repeat Q&A over the
   same episode is cheap. Q&A is **streamed** to the client.
 - The system prompt forbids inventing anything not supported by the transcript.
