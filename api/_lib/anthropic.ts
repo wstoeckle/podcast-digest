@@ -24,6 +24,7 @@ import {
   ASK_MAX_TOKENS,
   DEFAULT_ASK_EFFORT,
   DEFAULT_DIGEST_EFFORT,
+  DEFAULT_OVERNIGHT_MODEL,
   DIGEST_MAX_TOKENS,
   FALLBACK_BETA,
   acceptsEffort,
@@ -34,6 +35,7 @@ import {
 } from './claudeConfig.js';
 
 const MODEL = resolveModel(process.env.DIGEST_MODEL);
+const OVERNIGHT_MODEL = resolveModel(process.env.OVERNIGHT_MODEL, DEFAULT_OVERNIGHT_MODEL);
 const DIGEST_EFFORT = resolveEffort(process.env.DIGEST_EFFORT, DEFAULT_DIGEST_EFFORT);
 const ASK_EFFORT = resolveEffort(process.env.ASK_EFFORT, DEFAULT_ASK_EFFORT);
 
@@ -61,19 +63,19 @@ function fallbackParams() {
   return acceptsFallbacks(MODEL) ? { betas: [FALLBACK_BETA], fallbacks: 'default' as const } : {};
 }
 
-function effortParams(effort: Effort) {
-  return acceptsEffort(MODEL) ? { effort } : {};
+function effortParams(effort: Effort, model = MODEL) {
+  return acceptsEffort(model) ? { effort } : {};
 }
 
 /** The digest request, shared by the live call and the overnight batches. */
-function digestParams(transcript: string, meta: EpisodeMeta) {
+function digestParams(transcript: string, meta: EpisodeMeta, model = MODEL) {
   return {
-    model: MODEL,
+    model,
     max_tokens: DIGEST_MAX_TOKENS,
     system: DIGEST_SYSTEM,
     // Structured outputs: the reply is guaranteed to match DIGEST_SCHEMA.
     output_config: {
-      ...effortParams(DIGEST_EFFORT),
+      ...effortParams(DIGEST_EFFORT, model),
       format: { type: 'json_schema' as const, schema: DIGEST_SCHEMA },
     },
     messages: [{ role: 'user' as const, content: digestUserText(transcript, meta) }],
@@ -229,14 +231,17 @@ function requireClient(): Anthropic {
   return c;
 }
 
-/** Submit digests for several episodes as one batch; returns the batch id. */
+/**
+ * Submit digests for several episodes as one batch, on OVERNIGHT_MODEL;
+ * returns the batch id.
+ */
 export async function createDigestBatch(
   items: { customId: string; transcript: string; meta: EpisodeMeta }[],
 ): Promise<string> {
   const batch = await requireClient().messages.batches.create({
     requests: items.map((i) => ({
       custom_id: i.customId,
-      params: digestParams(i.transcript, i.meta),
+      params: digestParams(i.transcript, i.meta, OVERNIGHT_MODEL),
     })),
   });
   return batch.id;

@@ -282,3 +282,51 @@ describe('streamAnswer', () => {
     expect(JSON.stringify(calls[0]?.body)).toContain('[m:ss] markers');
   });
 });
+
+describe('createDigestBatch', () => {
+  function batchReply() {
+    return new Response(
+      JSON.stringify({
+        id: 'msgbatch_1',
+        type: 'message_batch',
+        processing_status: 'in_progress',
+        request_counts: { processing: 1, succeeded: 0, errored: 0, canceled: 0, expired: 0 },
+        created_at: '2026-11-18T09:00:00Z',
+        expires_at: '2026-11-19T09:00:00Z',
+        ended_at: null,
+        archived_at: null,
+        cancel_initiated_at: null,
+        results_url: null,
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  }
+
+  it('digests overnight on Claude Haiku 5.5, with the schema and no fallbacks', async () => {
+    stubFetch(batchReply);
+    const { createDigestBatch } = await load();
+    const id = await createDigestBatch([
+      { customId: 'abc', transcript: TRANSCRIPT, meta: { episodeTitle: 'Ep' } },
+    ]);
+    expect(id).toBe('msgbatch_1');
+    expect(calls[0]?.url).toContain('/v1/messages/batches');
+    const body = calls[0]?.body as {
+      requests: { custom_id: string; params: Record<string, unknown> }[];
+    };
+    expect(body.requests[0]?.custom_id).toBe('abc');
+    expect(body.requests[0]?.params).toMatchObject({
+      model: 'claude-haiku-5-5',
+      output_config: { effort: 'medium', format: { type: 'json_schema' } },
+    });
+    // Batches don't take fallbacks.
+    expect(body.requests[0]?.params).not.toHaveProperty('fallbacks');
+  });
+
+  it('honors OVERNIGHT_MODEL, while live digests keep using DIGEST_MODEL', async () => {
+    stubFetch(batchReply);
+    const { createDigestBatch } = await load({ OVERNIGHT_MODEL: 'claude-sonnet-5-5' });
+    await createDigestBatch([{ customId: 'abc', transcript: TRANSCRIPT, meta: {} }]);
+    const body = calls[0]?.body as { requests: { params: { model: string } }[] };
+    expect(body.requests[0]?.params.model).toBe('claude-sonnet-5-5');
+  });
+});
