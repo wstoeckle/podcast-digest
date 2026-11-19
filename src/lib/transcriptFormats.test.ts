@@ -77,4 +77,9 @@ General Kenobi.`;
       'Host: Welcome back to the show.\nGuest: Thanks for having me.\nHost: Let’s dig in.',
     );
   });
+
+  it('does not mistake plain text that mentions a tag for HTML', () => {
+    const text = 'ANNOUNCER: Embed code: <iframe src="x"></iframe>\nHOST: Hello.\nGUEST: Hi.';
+    expect(toPlainTranscript(text, 'text/plain').split('\n')).toHaveLength(3);
+  });
 });

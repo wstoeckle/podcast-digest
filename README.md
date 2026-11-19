@@ -7,10 +7,14 @@ listen to** in a fraction of the runtime.
   RSS feed, an Apple Podcasts URL, a **Pocket Casts** share link, a **Spotify**
   episode/show link, or a direct audio file. (Spotify exclusives have no public
   feed, so those can't be opened — true of any third-party app.)
-- **Transcript**: uses the show's published transcript when the feed has one
-  (Podcasting 2.0 `<podcast:transcript>`), otherwise **auto-transcribes** the
-  audio via AssemblyAI (URL ingest — we never move the audio through the
-  function).
+- **Transcript**: looks for one the show already published before paying to
+  transcribe: every `<podcast:transcript>` file in the feed (Podcasting 2.0),
+  then the episode's web page, a transcript page it links to on the same site
+  (Lex Fridman), or NPR's transcript page. Only if none turns up does it
+  **auto-transcribe** the audio via AssemblyAI (URL ingest — we never move the
+  audio through the function). A web page only counts when it's long enough
+  for the episode and reads like a conversation (or sits under a "Transcript"
+  heading), so show notes never get summarized as if they were the episode.
 - **Digest**: Claude writes a faithful TLDR, key points, topics, an episode
   outline, and short quotes (shown only if they appear word for word in the
   transcript), grounded
@@ -86,8 +90,8 @@ Turn them on from the home page, then tick the shows you want under **Shows to
 digest overnight**. Following a show doesn't add it; only ticked shows are sent
 to the server, and the picks are the same on every device. Each night (09:00
 UTC, set in `vercel.json`) the server checks those shows for episodes published
-since the last run, gets their transcripts (published ones first, then
-AssemblyAI up to the cap), and submits one Message Batch of digests at half
+since the last run, gets their transcripts (published ones first, from the
+feed or the show's website, then AssemblyAI up to the cap), and submits one Message Batch of digests at half
 price. When you next open the app, finished digests are collected and listed
 under **New overnight**; opening one is instant and costs nothing more.
 
@@ -129,8 +133,8 @@ run your own copy:
 
 Total cost at personal scale is small: Claude per digest (an estimated 5–15¢
 for an hour-long episode on the default Claude Opus 5.5, under a cent with
-`DIGEST_MODEL=claude-haiku-5-5`; each call logs its token use), AssemblyAI only for shows
-without a published transcript (or paste one in — free), Upstash and Vercel
+`DIGEST_MODEL=claude-haiku-5-5`; each call logs its token use), AssemblyAI only for episodes
+without a published transcript (in the feed or on the show's website) (or paste one in — free), Upstash and Vercel
 free tiers are plenty.
 
 ### History

@@ -84,3 +84,28 @@ describe('stripHtml', () => {
     expect(stripHtml('<p>Hello   <b>world</b></p>')).toBe('Hello world');
   });
 });
+
+describe('transcript tags and episode link', () => {
+  it('keeps every transcript tag, timed formats first, and the episode page', () => {
+    const xml = `<rss><channel><title>S</title><item><title>E</title><guid>g</guid>
+      <link>https://example.com/ep-1?utm=a&amp;b=c</link>
+      <podcast:transcript url="https://t.test/e.txt" type="text/plain"/>
+      <podcast:transcript url="https://t.test/e.srt" type="application/srt"/>
+      <podcast:transcript url="https://t.test/e.vtt" type="text/vtt" />
+      <podcast:transcript url="https://t.test/e.vtt" type="text/vtt" />
+    </item></channel></rss>`;
+    const ep = parseFeed(xml, 'https://f.test').episodes[0];
+    expect(ep?.transcripts).toEqual([
+      { url: 'https://t.test/e.vtt', type: 'text/vtt' },
+      { url: 'https://t.test/e.srt', type: 'application/srt' },
+      { url: 'https://t.test/e.txt', type: 'text/plain' },
+    ]);
+    expect(ep?.transcriptUrl).toBe('https://t.test/e.vtt');
+    expect(ep?.link).toBe('https://example.com/ep-1?utm=a&b=c');
+  });
+
+  it('ignores a <link> that is not a web address', () => {
+    const xml = `<rss><channel><item><title>E</title><guid>g</guid><link>not a url</link></item></channel></rss>`;
+    expect(parseFeed(xml, 'https://f.test').episodes[0]?.link).toBeUndefined();
+  });
+});

@@ -78,6 +78,8 @@ paste a link ────┴─▶ resolve ─▶ RSS feed ─▶ pick episode
                                                  │
                        transcript ◀── a transcript you paste in  (free, instant, wins)
                                   ◀── RSS <podcast:transcript>  (free, instant)
+                                  ◀── the show's website: episode page, a linked
+                                      transcript page, NPR's /transcripts/<id>  (free)
                                   ◀── AssemblyAI STT of the audio URL  (fallback)
                        (kept as timed text: `[m:ss]` paragraph markers when the source has times)
                                                  │
@@ -105,9 +107,11 @@ a jump can land a little off.
 
 - `src/lib/*` — **pure, unit-tested** logic shared by the browser and the API:
   `rss.ts` (feed parsing), `transcriptFormats.ts` (VTT/SRT/JSON → text, plain
-  or timed), `timed.ts` (time markers), `resolveUrl.ts` (link normalization),
-  `digestPrompt.ts` (prompt + schema + grounding), `askAnswer.ts` (folding the
-  cited answer stream into text + markers).
+  or timed), `timed.ts` (time markers), `pageTranscript.ts` (finding a
+  transcript on an episode's web page, and telling it from show notes),
+  `resolveUrl.ts` (link normalization), `digestPrompt.ts` (prompt + schema +
+  grounding), `askAnswer.ts` (folding the cited answer stream into text +
+  markers).
   These have **no** DOM or Node dependencies so they run in tests, the browser,
   and serverless functions alike.
 - `src/net/api.ts` — the **only** browser module that calls `fetch`.
@@ -133,7 +137,7 @@ a jump can land a little off.
 | `GET /api/search?q=`      | iTunes Search proxy → shows (keyless).                               |
 | `GET /api/feed?url=`      | Fetch + parse an RSS feed → show + episodes (avoids browser CORS).   |
 | `POST /api/resolve`       | Normalize a pasted URL → `{ feedUrl, guid? }`.                       |
-| `POST /api/transcript`    | Pasted transcript → cache-first → RSS transcript → submit STT job. `GET` polls it. |
+| `POST /api/transcript`    | Pasted transcript → cache-first → published transcript (feed files, then the show's website) → submit STT job. `GET` polls it. |
 | `POST /api/digest`        | Cached transcript → Claude → `{ tldr, bullets, topics, outline, quotes }`. |
 | `POST /api/ask`           | Streamed answer as NDJSON `AskEvent`s: text + cited transcript passages. |
 | `GET/POST /api/overnight` | Overnight digests: status + picked shows + collect (GET), add/remove picked shows (POST), nightly run (GET from Vercel Cron with `CRON_SECRET`). |
@@ -211,3 +215,7 @@ Add real keys to light up real episodes.
 - Summaries that editorialize or add claims the transcript doesn't support.
 - Moving big audio files through the serverless function (transcode/upload) —
   the STT layer ingests the audio **by URL** on purpose. Keep it that way.
+- Loosening the website transcript finder. Summarizing show notes, or another
+  episode's transcript, is worse than paying to transcribe: a page counts only
+  if it's long enough for the episode and reads like a conversation, and only
+  same-site links carrying the episode's own slug are followed.

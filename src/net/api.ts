@@ -6,6 +6,7 @@ import type {
   FeedResult,
   ResolveResult,
   SearchResultShow,
+  TranscriptLink,
   TranscriptResponse,
   ChatTurn,
   OvernightStatus,
@@ -53,6 +54,12 @@ export interface TranscriptStart {
   audioUrl?: string;
   transcriptUrl?: string;
   transcriptType?: string;
+  /** Every <podcast:transcript> in the feed, best first. */
+  transcripts?: TranscriptLink[];
+  /** The episode's web page, checked for a posted transcript. */
+  link?: string;
+  /** Lets the server tell a whole transcript from show notes. */
+  durationSec?: number;
   /** A transcript the user pasted in — skips STT, wins over everything. */
   transcript?: string;
 }
@@ -129,7 +136,9 @@ export async function streamAsk(
   emit(buffer + decoder.decode());
 }
 
-export function recommendDigests(input: import('../lib/listening').RecommendationInput): Promise<import('../lib/listening').RecommendationResult> {
+export function recommendDigests(
+  input: import('../lib/listening').RecommendationInput,
+): Promise<import('../lib/listening').RecommendationResult> {
   return postJson('/api/recommend', input);
 }
 

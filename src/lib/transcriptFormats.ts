@@ -8,7 +8,7 @@
 // answers can jump into the audio.
 
 import { stripHtml } from './rss.js';
-import { formatTimed, type Cue } from './timed.js';
+import { formatClock, formatTimed, type Cue } from './timed.js';
 
 function collapse(s: string): string {
   return s
@@ -109,7 +109,11 @@ export function toPlainTranscript(raw: string, type?: string): string {
   // SRT without a type hint: index line + timestamp with a comma.
   if (/\d+\r?\n\d{2}:\d{2}:\d{2},\d{3}\s*-->/.test(body)) return fromSrt(body);
   if (/-->/.test(body) && /\d{2}:\d{2}/.test(body)) return fromVtt(body);
-  if (t.includes('html') || /<\/?[a-z][\s\S]*>/i.test(body)) return collapse(stripHtml(body));
+  // Sniff for HTML only when the type doesn't say plain text: a plain transcript
+  // can mention "<tags>" (a page's embed code, say) without being HTML.
+  if (t.includes('html') || (!t.includes('plain') && /<\/?[a-z][\s\S]*>/i.test(body))) {
+    return collapse(stripHtml(body));
+  }
   return collapse(body);
 }
 
@@ -122,8 +126,32 @@ export function toPlainTranscript(raw: string, type?: string): string {
  */
 export function toTimedTranscript(raw: string, type?: string): string {
   const cues = timedCues(raw.trim(), (type ?? '').toLowerCase());
-  if (cues && cues.length >= 2) return formatTimed(cues);
+  if (cues && cues.length >= 2) {
+    const { chapters, rest } = splitChapterList(cues);
+    const body = formatTimed(rest);
+    if (!chapters.length) return body;
+    const list = chapters.map((c) => `${c.text} (${formatClock(c.start)})`).join(' · ');
+    return `Chapters: ${list}\n${body}`;
+  }
   return toPlainTranscript(raw, type);
+}
+
+/**
+ * Transcript pages often open with a table of contents: short titles whose
+ * times run through the episode, then the transcript restarts near zero. Keep
+ * that list as one plain line, so the transcript's own times stay in order.
+ */
+function splitChapterList(cues: Cue[]): { chapters: Cue[]; rest: Cue[] } {
+  for (let i = 1; i < cues.length; i++) {
+    if ((cues[i]?.start ?? 0) >= (cues[i - 1]?.start ?? 0)) continue;
+    const head = cues.slice(0, i);
+    const words = head.reduce((n, c) => n + (c.text.match(/\S+/g)?.length ?? 0), 0);
+    if (head.length >= 2 && words / head.length <= 12 && cues.length - i >= 3) {
+      return { chapters: head, rest: cues.slice(i) };
+    }
+    break;
+  }
+  return { chapters: [], rest: cues };
 }
 
 function timedCues(body: string, t: string): Cue[] | null {
@@ -204,6 +232,10 @@ function jsonCues(body: string): Cue[] | null {
 
 const LEADING_TIME = /^[[(]?((?:\d{1,2}:)?\d{1,2}:\d{2})(?:[.,]\d+)?[\])]?\s*(?:[-–—:|]\s*)?(.*)$/;
 const SPEAKER_THEN_TIME = /^(.{1,60}?)\s*[[(]?((?:\d{1,2}:)?\d{1,2}:\d{2})[\])]?\s*$/;
+// "Lex Fridman (00:12:34) What they said…" on one line. The time must be in
+// brackets, so an ordinary sentence with a time in it doesn't match.
+const SPEAKER_TIME_TEXT =
+  /^(.{1,60}?)\s*[[(]((?:\d{1,2}:)?\d{1,2}:\d{2})(?:[.,]\d+)?[\])]\s*:?\s+(\S.*)$/;
 
 /**
  * Pasted text with timestamps, in the shapes transcript sites use:
@@ -219,13 +251,22 @@ function textCues(body: string): Cue[] | null {
     if (!line) continue;
     const lead = LEADING_TIME.exec(line);
     // A "Speaker Name  12:34" header: a short name, not a sentence ending in a time.
-    const headMatch = lead ? null : SPEAKER_THEN_TIME.exec(line);
-    const head = headMatch && (headMatch[1] ?? '').split(/\s+/).length <= 5 ? headMatch : null;
-    const time = lead ? clock(lead[1]) : head ? clock(head[2]) : undefined;
+    const shortName = (m: RegExpExecArray | null) =>
+      m && (m[1] ?? '').split(/\s+/).length <= 5 ? m : null;
+    const head = lead ? null : shortName(SPEAKER_THEN_TIME.exec(line));
+    const inline = lead || head ? null : shortName(SPEAKER_TIME_TEXT.exec(line));
+    const time = lead
+      ? clock(lead[1])
+      : head
+        ? clock(head[2])
+        : inline
+          ? clock(inline[2])
+          : undefined;
     if (time !== undefined) {
       if (cur?.text) cues.push(cur);
-      const speaker = head ? head[1]?.replace(/[:\-–—]+$/, '').trim() : undefined;
-      const text = lead ? (lead[2] ?? '').trim() : '';
+      const who = head?.[1] ?? inline?.[1];
+      const speaker = who ? who.replace(/[:\-–—]+$/, '').trim() : undefined;
+      const text = lead ? (lead[2] ?? '').trim() : inline ? (inline[3] ?? '').trim() : '';
       cur = speaker ? { start: time, text, speaker } : { start: time, text };
       continue;
     }
@@ -233,12 +274,14 @@ function textCues(body: string): Cue[] | null {
   }
   if (cur?.text) cues.push(cur);
   if (cues.length < 3) return null;
-  // Timestamps should run forward; a handful out of order means they aren't times.
+  // Timestamps should run forward (after any table of contents); a handful out
+  // of order means they aren't times.
+  const { rest } = splitChapterList(cues);
   let backwards = 0;
-  for (let i = 1; i < cues.length; i++) {
-    if ((cues[i]?.start ?? 0) < (cues[i - 1]?.start ?? 0)) backwards++;
+  for (let i = 1; i < rest.length; i++) {
+    if ((rest[i]?.start ?? 0) < (rest[i - 1]?.start ?? 0)) backwards++;
   }
-  return backwards > cues.length / 10 ? null : cues;
+  return backwards > rest.length / 10 ? null : cues;
 }
 
 function clock(raw: string | undefined): number | undefined {

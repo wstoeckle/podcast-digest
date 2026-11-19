@@ -25,7 +25,7 @@ import {
   type EpisodeMeta,
 } from '../../src/lib/digestPrompt.js';
 import type { TranscriptStatus } from '../../src/types.js';
-import { digestKey, transcriptKey } from './transcripts.js';
+import { digestKey, transcriptKey, type TranscriptSources } from './transcripts.js';
 
 /** The Redis operations the pipeline uses (see redisStore in api/overnight.ts). */
 export interface OvernightStore {
@@ -56,7 +56,8 @@ export interface OvernightDeps {
   now(): number;
   sleep(ms: number): Promise<void>;
   fetchFeed(url: string): Promise<FeedResult | null>;
-  fetchTranscript(url: string, type?: string): Promise<string | null>;
+  /** A transcript the show already published (feed file or episode web page). */
+  findTranscript(sources: TranscriptSources): Promise<string | null>;
   stt: {
     submit(audioUrl: string): Promise<string>;
     poll(jobId: string): Promise<{ status: TranscriptStatus; text?: string; error?: string }>;
@@ -255,8 +256,7 @@ async function discover(
   interface Candidate {
     ep: OvEpisode;
     audioUrl?: string | undefined;
-    transcriptUrl?: string | undefined;
-    transcriptType?: string | undefined;
+    sources: TranscriptSources;
   }
   const candidates: Candidate[] = [];
   parsed.forEach((feed, i) => {
@@ -280,8 +280,13 @@ async function discover(
           stage: 'skipped',
         },
         audioUrl: e.audioUrl,
-        transcriptUrl: e.transcriptUrl,
-        transcriptType: e.transcriptType,
+        sources: {
+          transcripts: e.transcripts,
+          transcriptUrl: e.transcriptUrl,
+          transcriptType: e.transcriptType,
+          link: e.link,
+          durationSec: e.durationSec,
+        },
       });
     }
   });
@@ -289,13 +294,13 @@ async function discover(
   candidates.sort((a, b) => published(b) - published(a));
 
   let taken = 0;
-  for (const { ep, audioUrl, transcriptUrl, transcriptType } of candidates) {
+  for (const { ep, audioUrl, sources } of candidates) {
     if (taken >= cfg.maxEpisodes) break;
     if ((await store.exists(KEYS.ep(ep.id))) || (await store.exists(digestKey(ep.guid)))) continue;
 
     let transcript = await store.get<string>(transcriptKey(ep.guid));
-    if (!transcript && transcriptUrl) {
-      transcript = await deps.fetchTranscript(transcriptUrl, transcriptType).catch(() => null);
+    if (!transcript) {
+      transcript = await deps.findTranscript(sources).catch(() => null);
       if (transcript)
         await store.set(transcriptKey(ep.guid), transcript, { ex: CACHE_TTL_SECONDS });
     }

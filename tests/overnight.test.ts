@@ -103,8 +103,11 @@ function harness(feeds: Record<string, FeedResult>) {
     now: () => NOW,
     sleep: async () => {},
     fetchFeed: async (url) => feeds[url] ?? null,
-    fetchTranscript: async (url) =>
-      url.includes('published') ? '[0:00] Host: the batteries got cheap.\n[0:40] More.' : null,
+    // A published transcript: a feed file, or one on the episode's web page.
+    findTranscript: async (src) =>
+      src.transcriptUrl?.includes('published') || src.link?.includes('with-transcript')
+        ? '[0:00] Host: the batteries got cheap.\n[0:40] More.'
+        : null,
     stt: {
       submit: async (audioUrl) => {
         const id = `job-${audioUrl.split('/').pop()}`;
@@ -227,6 +230,24 @@ describe('runOvernight', () => {
       tldr: 'A TLDR.',
       feedUrl: expect.stringContaining('https://f.test/'),
     });
+  });
+
+  it("uses a transcript from the show's website instead of transcribing", async () => {
+    const h = harness({
+      'https://f.test/A': feed('A', [
+        {
+          guid: 'w1',
+          title: 'Web transcript',
+          publishedAt: recent,
+          audioUrl: 'https://cdn.test/w1.mp3',
+          link: 'https://show.test/with-transcript',
+        },
+      ]),
+    });
+    await addFeeds(h.store, [{ feedUrl: 'https://f.test/A', title: 'A' }], 0);
+    const night = await runOvernight(h.deps, cfg, 'nightly');
+    expect(night).toMatchObject({ discovered: 1, transcribing: 0, batched: 1 });
+    expect(await h.store.get(transcriptKey('w1'))).toContain('batteries');
   });
 
   it('does not redo episodes on the next night', async () => {

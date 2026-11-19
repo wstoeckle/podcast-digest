@@ -73,7 +73,9 @@ export function formatTimed(cues: Cue[], paragraphSec = 30): string {
       (elapsed >= paragraphSec && endedSentence) ||
       elapsed >= paragraphSec * 2
     ) {
-      paras.push({ start: c.start, speaker, parts: [text] });
+      // Never let a paragraph start before the one above it: lookups by
+      // position assume the markers run forward.
+      paras.push({ start: Math.max(c.start, cur?.start ?? 0), speaker, parts: [text] });
     } else {
       cur.parts.push(text);
     }
