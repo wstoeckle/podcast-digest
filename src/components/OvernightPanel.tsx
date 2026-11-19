@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { OvernightStatus } from '../types';
+import type { OvernightShow, OvernightStatus } from '../types';
 import type { FollowedShow } from '../lib/following';
 import { getOvernight, syncOvernight } from '../net/api';
-import { isOvernightOn, setOvernightOn } from '../lib/overnight';
+import {
+  feedKey,
+  isOvernightOn,
+  pickerRows,
+  setOvernightOn,
+  type PickerRow,
+} from '../lib/overnight';
 import { formatDate } from '../lib/format';
+import OvernightShowPicker from './OvernightShowPicker';
 
 /**
- * Overnight digests: new episodes of followed shows, digested while you sleep.
- * Off by default; turning it on shares the followed-shows list with the server.
+ * Overnight digests: new episodes of the shows you pick, digested while you
+ * sleep. Off by default; only the picked shows are shared with the server.
  */
 export default function OvernightPanel({ following }: { following: FollowedShow[] }) {
   const nav = useNavigate();
@@ -16,28 +23,20 @@ export default function OvernightPanel({ following }: { following: FollowedShow[
   const [status, setStatus] = useState<OvernightStatus | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<Set<string>>(new Set());
 
-  // While on: keep the server's list in step with this device's follows, then
-  // load the latest (which also collects digests that finished overnight).
+  // While on, load the picks and the latest digests (this also collects
+  // digests that finished overnight).
   useEffect(() => {
     if (!on) return;
     let live = true;
-    const shows = following.map(({ feedUrl, title, artwork }) =>
-      artwork ? { feedUrl, title, artwork } : { feedUrl, title },
-    );
-    (async () => {
-      try {
-        if (shows.length) await syncOvernight({ action: 'add', shows });
-        const s = await getOvernight();
-        if (live) setStatus(s);
-      } catch (err) {
-        if (live) setError((err as Error).message);
-      }
-    })();
+    getOvernight()
+      .then((s) => live && setStatus(s))
+      .catch((err: Error) => live && setError(err.message));
     return () => {
       live = false;
     };
-  }, [on, following]);
+  }, [on]);
 
   function turnOn() {
     setOvernightOn(true);
@@ -50,12 +49,43 @@ export default function OvernightPanel({ following }: { following: FollowedShow[
     try {
       await syncOvernight({ action: 'clear' });
     } catch {
-      /* turning off locally still stops future syncs */
+      /* turning off locally still stops this device from adding picks */
     }
     setOvernightOn(false);
     setOn(false);
     setStatus(null);
     setBusy(false);
+  }
+
+  async function toggle(row: PickerRow, chosen: boolean) {
+    if (!status) return;
+    const key = feedKey(row.feedUrl);
+    const before = status.shows;
+    const show: OvernightShow = row.artwork
+      ? { feedUrl: row.feedUrl, title: row.title, artwork: row.artwork }
+      : { feedUrl: row.feedUrl, title: row.title };
+    // Show the change straight away; the server's answer replaces it.
+    setStatus({
+      ...status,
+      shows: chosen ? [...before, show] : before.filter((s) => feedKey(s.feedUrl) !== key),
+    });
+    setPending((p) => new Set(p).add(row.feedUrl));
+    setError('');
+    try {
+      const next = await syncOvernight(
+        chosen ? { action: 'add', shows: [show] } : { action: 'remove', feedUrls: [row.feedUrl] },
+      );
+      setStatus(next);
+    } catch (err) {
+      setStatus((s) => (s ? { ...s, shows: before } : s));
+      setError((err as Error).message);
+    } finally {
+      setPending((p) => {
+        const n = new Set(p);
+        n.delete(row.feedUrl);
+        return n;
+      });
+    }
   }
 
   if (!on) {
@@ -64,11 +94,11 @@ export default function OvernightPanel({ following }: { following: FollowedShow[
         <h2 className="section-title">Overnight digests</h2>
         <div className="panel">
           <p style={{ marginTop: 0 }}>
-            New episodes of the shows you follow, digested while you sleep — ready when you open the
-            app, at half the usual cost.
+            New episodes of the shows you pick, digested while you sleep — ready when you open the
+            app.
           </p>
           <p className="muted small">
-            Turning this on shares the list of shows you follow with the server, so it knows what to
+            You choose which shows. Only those are shared with the server, so it knows what to
             check. Your library and listening stay on this device.
           </p>
           <button className="btn ghost" onClick={turnOn} disabled={following.length === 0}>
@@ -81,6 +111,7 @@ export default function OvernightPanel({ following }: { following: FollowedShow[
   }
 
   const items = status?.items ?? [];
+  const picked = status?.shows.length ?? 0;
   return (
     <section>
       <h2 className="section-title">New overnight</h2>
@@ -120,16 +151,24 @@ export default function OvernightPanel({ following }: { following: FollowedShow[
           ))}
         </div>
       ) : (
-        status?.available && (
+        status?.available &&
+        picked > 0 && (
           <p className="empty">
             Nothing yet. New episodes show up here the morning after they come out.
           </p>
         )
       )}
+      {status?.available && (
+        <OvernightShowPicker
+          rows={pickerRows(following, status.shows)}
+          pending={pending}
+          onToggle={toggle}
+        />
+      )}
       {error && <p className="error">{error}</p>}
       <p className="muted small">
-        {status?.available
-          ? `Checking ${status.following} show${status.following === 1 ? '' : 's'} each night` +
+        {status?.available && picked > 0
+          ? `Checking ${picked} show${picked === 1 ? '' : 's'} each night` +
             (status.pending ? ` · ${status.pending} on the way` : '') +
             (status.lastRunAt
               ? ` · last run ${formatDate(new Date(status.lastRunAt).toISOString())}`

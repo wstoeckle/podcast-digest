@@ -12,6 +12,13 @@ const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 
 /**
+ * Overnight digests are made for episodes you may never open, so they default
+ * to Claude Haiku 5.5: $0.10 / $0.50 per million tokens, halved again by the
+ * Batch API — a fraction of a cent per episode. Override with OVERNIGHT_MODEL.
+ */
+export const DEFAULT_OVERNIGHT_MODEL = 'claude-haiku-5-5';
+
+/**
  * Effort replaces thinking budgets on current models and is the main
  * cost/latency dial. The digest is careful reading of a long transcript;
  * follow-up answers are short chat, where `low` keeps time-to-first-token down.
@@ -26,8 +33,8 @@ export const ASK_MAX_TOKENS = 8_000;
 /** Server-side refusal fallbacks (beta): a declined request is retried on another model. */
 export const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
-export function resolveModel(raw: string | undefined): string {
-  return raw?.trim() || DEFAULT_MODEL;
+export function resolveModel(raw: string | undefined, fallback = DEFAULT_MODEL): string {
+  return raw?.trim() || fallback;
 }
 
 export function resolveEffort(raw: string | undefined, fallback: Effort): Effort {

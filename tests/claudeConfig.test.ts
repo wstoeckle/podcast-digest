@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_MODEL,
+  DEFAULT_OVERNIGHT_MODEL,
   acceptsEffort,
   acceptsFallbacks,
   resolveEffort,
@@ -13,6 +14,11 @@ describe('resolveModel', () => {
     expect(resolveModel(undefined)).toBe('claude-opus-5-5');
     expect(resolveModel('  ')).toBe('claude-opus-5-5');
     expect(resolveModel(' claude-haiku-5-5 ')).toBe('claude-haiku-5-5');
+  });
+
+  it('defaults overnight digests to Claude Haiku 5.5', () => {
+    expect(DEFAULT_OVERNIGHT_MODEL).toBe('claude-haiku-5-5');
+    expect(resolveModel(undefined, DEFAULT_OVERNIGHT_MODEL)).toBe('claude-haiku-5-5');
   });
 });
 

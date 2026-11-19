@@ -25,8 +25,8 @@ listen to** in a fraction of the runtime.
   fits five or six. Queue items embed their text, so playback works offline.
 - **Bring your shows**: import your subscriptions via OPML (Pocket Casts:
   Profile → Settings → Export Podcasts; most podcast apps export the same file).
-- **Overnight digests** (opt-in): new episodes of the shows you follow are
-  digested each night at half price, so they're waiting when you open the app.
+- **Overnight digests** (opt-in): new episodes of the shows you pick are
+  digested each night, so they're waiting when you open the app.
 - **Installable PWA**, iPhone-first. Your library, follows, and queue live in
   `localStorage` — no account.
 
@@ -59,6 +59,7 @@ All optional (see `.env.example`). Set them in your Vercel project (or
 | `RL_LLM_PER_HOUR` / `RL_STT_PER_HOUR` (optional) | Per-IP hourly caps for digest+Q&A / new transcriptions. Defaults 40 / 15. |
 | `RL_LLM_GLOBAL_PER_HOUR` / `RL_STT_GLOBAL_PER_HOUR` (optional) | Whole-deployment hourly ceilings across all callers combined. Defaults 150 / 30. |
 | `CRON_SECRET`                                     | Turns on the nightly overnight-digest run (Vercel Cron sends it). Any long random string. |
+| `OVERNIGHT_MODEL` (optional)                      | Model for overnight digests; default `claude-haiku-5-5` (a fraction of a cent each). Digests you open yourself still use `DIGEST_MODEL`. |
 | `OVERNIGHT_MAX_EPISODES` / `OVERNIGHT_MAX_TRANSCRIBE` (optional) | Per-night caps: episodes digested, and how many of those may be transcribed from audio. Defaults 8 / 4 (`0` = published transcripts only). |
 
 ### Protecting your keys on a public URL
@@ -81,20 +82,27 @@ SSO), which gates the site at the edge before any function runs.
 
 ## Overnight digests
 
-Turn them on from the home page. Each night (09:00 UTC, set in `vercel.json`)
-the server checks the shows you follow for episodes published since the last
-run, gets their transcripts (published ones first, then AssemblyAI up to the
-cap), and submits one Message Batch of digests at half price. When you next
-open the app, finished digests are collected and listed under **New overnight**;
-opening one is instant and costs nothing more.
+Turn them on from the home page, then tick the shows you want under **Shows to
+digest overnight**. Following a show doesn't add it; only ticked shows are sent
+to the server, and the picks are the same on every device. Each night (09:00
+UTC, set in `vercel.json`) the server checks those shows for episodes published
+since the last run, gets their transcripts (published ones first, then
+AssemblyAI up to the cap), and submits one Message Batch of digests at half
+price. When you next open the app, finished digests are collected and listed
+under **New overnight**; opening one is instant and costs nothing more.
 
 Needs Upstash Redis, `ANTHROPIC_API_KEY`, and `CRON_SECRET`. To try it without
 waiting for the night, use **Run** on the cron job in the Vercel dashboard
 (Settings → Cron Jobs).
 
-Cost with the default caps is bounded: at most 8 digests a night at batch
-prices (roughly half the per-digest cost above), plus up to 4 AssemblyAI
-transcriptions.
+Cost with the defaults is bounded and small. Overnight digests use
+`OVERNIGHT_MODEL` (Claude Haiku 5.5): about 0.2¢ per hour-long episode at batch
+prices, so 8 a night is about 1–2¢. The larger cost is transcription: up to 4
+AssemblyAI jobs a night, at roughly $0.15–0.25 per audio hour. Set
+`OVERNIGHT_MAX_TRANSCRIBE=0` to digest only episodes that come with a published
+transcript, which makes the whole run cost a few cents a night. Overnight
+digests are what you see when you open those episodes, so they are Haiku
+digests, not Opus.
 
 ## Deploy
 
