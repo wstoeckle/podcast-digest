@@ -55,6 +55,15 @@ describe('formatTimed', () => {
     ]);
     expect(out).toBe('[0:00] one and two and\n[1:01] three.');
   });
+
+  it('never lets a paragraph start before the one above it', () => {
+    const out = formatTimed([
+      { start: 60, text: 'Later.', speaker: 'A' },
+      { start: 50, text: 'Out of order.', speaker: 'B' },
+      { start: 70, text: 'On again.', speaker: 'A' },
+    ]);
+    expect(markers(out).map((m) => m.start)).toEqual([60, 60, 70]);
+  });
 });
 
 describe('markers and lookups', () => {
@@ -144,6 +153,45 @@ General Kenobi.`;
     expect(toTimedTranscript(pasted)).toBe(
       '[0:00] Jane Doe: Hi everyone.\n[0:40] John Smith: Hello.\n[1:20] Jane Doe: Let us begin.',
     );
+  });
+
+  it('reads "Speaker (12:34) text" lines, as transcript pages print them', () => {
+    const page = [
+      'Lex Fridman (00:00:00) The following is a conversation with Larry.',
+      'Larry Lawton (00:00:41) Thanks for having me.',
+      'Lex Fridman (00:01:20) Let us start at the beginning.',
+    ].join('\n');
+    expect(toTimedTranscript(page, 'text/plain')).toBe(
+      [
+        '[0:00] Lex Fridman: The following is a conversation with Larry.',
+        '[0:41] Larry Lawton: Thanks for having me.',
+        '[1:20] Lex Fridman: Let us start at the beginning.',
+      ].join('\n'),
+    );
+  });
+
+  it('keeps a table of contents as one line, ahead of the timed transcript', () => {
+    const page = [
+      '(00:00) Introduction',
+      '(12:30) Prison',
+      '(48:10) Advice',
+      'Lex Fridman (00:00:00) The following is a conversation.',
+      'Larry Lawton (00:00:41) Thanks for having me.',
+      'Lex Fridman (00:01:20) Let us start.',
+    ].join('\n');
+    const out = toTimedTranscript(page, 'text/plain');
+    expect(out.split('\n')[0]).toBe(
+      'Chapters: Introduction (0:00) · Prison (12:30) · Advice (48:10)',
+    );
+    expect(markers(out).map((m) => m.start)).toEqual([0, 41, 80]);
+  });
+
+  it('does not take a sentence with a time in brackets for a speaker line', () => {
+    const text = [
+      'We met at the station and talked for a long while about the trains (10:30) then left.',
+      'Nothing else.',
+    ].join('\n');
+    expect(isTimed(toTimedTranscript(text, 'text/plain'))).toBe(false);
   });
 
   it('round-trips its own output', () => {

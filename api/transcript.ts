@@ -1,6 +1,7 @@
 // Transcript pipeline.
-//   POST /api/transcript { guid, audioUrl?, transcriptUrl?, transcriptType? }
-//     → cache-first, then a published RSS transcript, else kick off STT.
+//   POST /api/transcript { guid, audioUrl?, transcripts?, link?, durationSec?, … }
+//     → cache-first, then a transcript the show already published (the feed's
+//       transcript files, then its website), else kick off STT.
 //   GET  /api/transcript?guid=...&jobId=...
 //     → poll a running STT job; caches the text on completion.
 //
@@ -8,14 +9,14 @@
 // Redis (Redis only caches the final text to avoid re-transcribing).
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { TranscriptResponse } from '../src/types.js';
+import type { TranscriptLink, TranscriptResponse } from '../src/types.js';
 import { toTimedTranscript } from '../src/lib/transcriptFormats.js';
 import { DEMO_TRANSCRIPT, MAX_TRANSCRIPT_CHARS } from '../src/lib/digestPrompt.js';
 import { jsonBody, methodNotAllowed, safeRemoteUrl, str } from './_lib/http.js';
 import { rateLimit, sttGlobalPerHour, sttPerHour, tooMany } from './_lib/ratelimit.js';
 import { hasStt, sttProvider } from './_lib/stt.js';
 import {
-  fetchTranscriptFile,
+  findExistingTranscript,
   getCachedTranscript as getCached,
   putCachedTranscript as putCached,
 } from './_lib/transcripts.js';
@@ -58,19 +59,31 @@ async function startOrReturn(req: VercelRequest, res: VercelResponse) {
 
   const cached = await getCached(guid);
   if (cached) {
-    res.status(200).json({ status: 'ready', text: cached, source: 'cache' } satisfies TranscriptResponse);
+    res
+      .status(200)
+      .json({ status: 'ready', text: cached, source: 'cache' } satisfies TranscriptResponse);
     return;
   }
 
-  // 1) A transcript published in the RSS feed — free and instant.
-  const transcriptUrl = safeRemoteUrl(str(body.transcriptUrl));
-  if (transcriptUrl) {
-    const text = await fetchTranscriptFile(transcriptUrl.toString(), str(body.transcriptType));
-    if (text) {
-      await putCached(guid, text);
-      res.status(200).json({ status: 'ready', text, source: 'rss' } satisfies TranscriptResponse);
-      return;
-    }
+  // 1) A transcript that already exists — free: the feed's transcript files,
+  // then the show's website. Only if there's none do we pay to transcribe.
+  const found = await findExistingTranscript({
+    transcripts: transcriptLinks(body.transcripts),
+    transcriptUrl: str(body.transcriptUrl),
+    transcriptType: str(body.transcriptType),
+    link: str(body.link),
+    durationSec: typeof body.durationSec === 'number' ? body.durationSec : undefined,
+  });
+  if (found) {
+    await putCached(guid, found.text);
+    res
+      .status(200)
+      .json({
+        status: 'ready',
+        text: found.text,
+        source: found.source,
+      } satisfies TranscriptResponse);
+    return;
   }
 
   // 2) No key configured → demo transcript so the flow stays clickable.
@@ -122,7 +135,9 @@ async function pollJob(req: VercelRequest, res: VercelResponse) {
 
   const cached = await getCached(guid);
   if (cached) {
-    res.status(200).json({ status: 'ready', text: cached, source: 'cache' } satisfies TranscriptResponse);
+    res
+      .status(200)
+      .json({ status: 'ready', text: cached, source: 'cache' } satisfies TranscriptResponse);
     return;
   }
 
@@ -137,7 +152,9 @@ async function pollJob(req: VercelRequest, res: VercelResponse) {
     const result = await provider.poll(jobId);
     if (result.status === 'ready' && result.text) {
       await putCached(guid, result.text);
-      res.status(200).json({ status: 'ready', text: result.text, source: 'stt' } satisfies TranscriptResponse);
+      res
+        .status(200)
+        .json({ status: 'ready', text: result.text, source: 'stt' } satisfies TranscriptResponse);
       return;
     }
     const out: TranscriptResponse = { status: result.status };
@@ -149,4 +166,17 @@ async function pollJob(req: VercelRequest, res: VercelResponse) {
       .status(502)
       .json({ status: 'error', error: (err as Error).message } satisfies TranscriptResponse);
   }
+}
+
+/** The feed's transcript links as the client sent them (at most a handful). */
+function transcriptLinks(v: unknown): TranscriptLink[] {
+  if (!Array.isArray(v)) return [];
+  const out: TranscriptLink[] = [];
+  for (const item of v.slice(0, 6)) {
+    if (!item || typeof item !== 'object') continue;
+    const url = str((item as Record<string, unknown>).url);
+    const type = str((item as Record<string, unknown>).type);
+    if (url) out.push(type ? { url, type } : { url });
+  }
+  return out;
 }

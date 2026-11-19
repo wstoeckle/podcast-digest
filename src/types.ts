@@ -20,9 +20,18 @@ export interface Episode {
   /** ISO date string. */
   publishedAt?: string;
   description?: string;
-  /** From a Podcasting-2.0 <podcast:transcript> tag, if present. */
+  /** The best Podcasting-2.0 <podcast:transcript> tag, if present. */
   transcriptUrl?: string;
   transcriptType?: string;
+  /** Every <podcast:transcript> tag, best format first (timed before plain). */
+  transcripts?: TranscriptLink[];
+  /** The episode's web page (RSS <link>), where many shows post a transcript. */
+  link?: string;
+}
+
+export interface TranscriptLink {
+  url: string;
+  type?: string;
 }
 
 export interface FeedResult {
@@ -54,7 +63,7 @@ export interface TranscriptResponse {
   /** Present when status === 'ready'. */
   text?: string;
   /** How we obtained it, for the UI. */
-  source?: 'cache' | 'rss' | 'stt' | 'demo' | 'pasted';
+  source?: 'cache' | 'rss' | 'web' | 'stt' | 'demo' | 'pasted';
   /** STT job id to poll with (status === 'processing'); client echoes it back. */
   jobId?: string;
   error?: string;

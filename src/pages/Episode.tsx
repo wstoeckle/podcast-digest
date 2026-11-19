@@ -180,7 +180,7 @@ export default function Episode() {
       {(phase === 'loading' || phase === 'transcribing' || phase === 'summarizing') && (
         <>
           <StatusPanel phase={phase} source={source} />
-          {phase === 'transcribing' && source !== 'rss' && (
+          {phase === 'transcribing' && source === 'stt' && (
             <PasteTranscript
               onSubmit={usePasted}
               label="Have the transcript? Paste it to skip the wait →"
@@ -255,9 +255,9 @@ function StatusPanel({ phase, source }: { phase: Phase; source?: TranscriptRespo
     phase === 'loading'
       ? 'Loading the episode…'
       : phase === 'transcribing'
-        ? source === 'rss'
-          ? 'Reading the published transcript…'
-          : 'Transcribing the audio… this can take a minute for a long episode.'
+        ? source === 'stt'
+          ? 'Transcribing the audio… this can take a minute for a long episode.'
+          : 'Looking for a transcript the show already published…'
         : 'Summarizing with Claude…';
   const stepClass = (i: number) => {
     const active = phase === 'loading' ? 0 : phase === 'transcribing' ? 1 : 2;
@@ -284,6 +284,8 @@ function sourceLabel(source: TranscriptResponse['source']): string {
   switch (source) {
     case 'rss':
       return 'from the show’s published transcript';
+    case 'web':
+      return 'from the transcript on the show’s website';
     case 'stt':
       return 'auto-transcribed from the audio';
     case 'pasted':
@@ -334,12 +336,18 @@ async function obtainTranscript(
     ...(ep.audioUrl ? { audioUrl: ep.audioUrl } : {}),
     ...(ep.transcriptUrl ? { transcriptUrl: ep.transcriptUrl } : {}),
     ...(ep.transcriptType ? { transcriptType: ep.transcriptType } : {}),
+    // Where the server looks for a transcript the show already published.
+    ...(ep.transcripts?.length ? { transcripts: ep.transcripts } : {}),
+    ...(ep.link ? { link: ep.link } : {}),
+    ...(ep.durationSec ? { durationSec: ep.durationSec } : {}),
   });
   if (start.status === 'ready' && start.text) {
     setSource(start.source);
     return start.text;
   }
   if (start.status === 'error') throw new Error(start.error ?? 'transcription failed');
+  // Nothing published: the audio is being transcribed.
+  setSource('stt');
 
   // Poll the running job.
   let jobId = start.jobId;

@@ -26,7 +26,7 @@ import {
 import { rateLimit, tooMany } from './_lib/ratelimit.js';
 import { redis } from './_lib/redis.js';
 import { sttProvider } from './_lib/stt.js';
-import { fetchTranscriptFile } from './_lib/transcripts.js';
+import { findExistingTranscript } from './_lib/transcripts.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
@@ -129,10 +129,7 @@ function deps(store: OvernightStore): OvernightDeps {
     now: () => Date.now(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     fetchFeed,
-    fetchTranscript: (url, type) => {
-      const safe = safeRemoteUrl(url);
-      return safe ? fetchTranscriptFile(safe.toString(), type) : Promise.resolve(null);
-    },
+    findTranscript: async (sources) => (await findExistingTranscript(sources))?.text ?? null,
     stt: sttProvider(),
     claude: { createBatch: createDigestBatch, readBatch: readDigestBatch },
     log: (event) => console.log(JSON.stringify(event)),

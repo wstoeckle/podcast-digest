@@ -5,7 +5,7 @@
 // enclosure audio URLs, itunes:duration, and Podcasting-2.0
 // <podcast:transcript> tags.
 
-import type { Episode, FeedResult, Show } from '../types.js';
+import type { Episode, FeedResult, Show, TranscriptLink } from '../types.js';
 import { parseDuration } from './format.js';
 
 /** Small stable hash → base36, used for guids when a feed omits them. */
@@ -41,7 +41,9 @@ function tagAttr(scope: string, tag: string, attr: string): string | undefined {
   const re = new RegExp(`<${escapeTag(tag)}\\b([^>]*)>`, 'i');
   const m = re.exec(scope);
   if (!m) return undefined;
-  const am = new RegExp(`${attr}\\s*=\\s*"([^"]*)"|${attr}\\s*=\\s*'([^']*)'`, 'i').exec(m[1] ?? '');
+  const am = new RegExp(`${attr}\\s*=\\s*"([^"]*)"|${attr}\\s*=\\s*'([^']*)'`, 'i').exec(
+    m[1] ?? '',
+  );
   if (!am) return undefined;
   return decodeEntities(am[1] ?? am[2] ?? '');
 }
@@ -79,13 +81,43 @@ function parseItem(block: string): Episode | null {
   const desc = firstOf(block, ['itunes:summary', 'description', 'itunes:subtitle']);
   if (desc) ep.description = stripHtml(desc);
 
-  const tUrl = tagAttr(block, 'podcast:transcript', 'url');
-  if (tUrl) {
-    ep.transcriptUrl = tUrl;
-    const tType = tagAttr(block, 'podcast:transcript', 'type');
-    if (tType) ep.transcriptType = tType;
+  const transcripts = transcriptTags(block);
+  const best = transcripts[0];
+  if (best) {
+    ep.transcriptUrl = best.url;
+    if (best.type) ep.transcriptType = best.type;
+    ep.transcripts = transcripts;
   }
+
+  const link = firstOf(block, ['link']);
+  if (link && /^https?:\/\//i.test(link)) ep.link = link;
   return ep;
+}
+
+/** Formats with timing first: they keep timestamps for jumping into the audio. */
+const TRANSCRIPT_RANK = ['json', 'vtt', 'srt', 'subrip', 'html', 'plain'];
+
+function transcriptRank(type: string | undefined): number {
+  const t = (type ?? '').toLowerCase();
+  const i = TRANSCRIPT_RANK.findIndex((k) => t.includes(k));
+  return i < 0 ? TRANSCRIPT_RANK.length : i;
+}
+
+/** Every <podcast:transcript> tag in an item, best format first. */
+function transcriptTags(block: string): TranscriptLink[] {
+  const out: TranscriptLink[] = [];
+  for (const m of block.matchAll(/<podcast:transcript\b([^>]*)>/gi)) {
+    const attrs = m[1] ?? '';
+    const attr = (name: string) => {
+      const a = new RegExp(`${name}\\s*=\\s*"([^"]*)"|${name}\\s*=\\s*'([^']*)'`, 'i').exec(attrs);
+      return a ? decodeEntities(a[1] ?? a[2] ?? '') : undefined;
+    };
+    const url = attr('url');
+    if (!url || out.some((t) => t.url === url)) continue;
+    const type = attr('type');
+    out.push(type ? { url, type } : { url });
+  }
+  return out.sort((a, b) => transcriptRank(a.type) - transcriptRank(b.type));
 }
 
 export function stripHtml(s: string): string {
