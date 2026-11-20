@@ -16,19 +16,20 @@ import {
 } from '../../src/lib/pageTranscript.js';
 import { toTimedTranscript } from '../../src/lib/transcriptFormats.js';
 import { fetchWithTimeout, safeRemoteUrl } from './http.js';
-import { CACHE_TTL_SECONDS, redis } from './redis.js';
+import { CACHE_TTL_SECONDS, tryRedis } from './redis.js';
 
 export const transcriptKey = (guid: string) => `t:${guid}`;
 
 export async function getCachedTranscript(guid: string): Promise<string | null> {
-  const kv = redis();
-  if (!kv) return null;
-  return (await kv.get<string>(transcriptKey(guid))) ?? null;
+  return tryRedis('transcript_get', (kv) => kv.get<string>(transcriptKey(guid)), null);
 }
 
 export async function putCachedTranscript(guid: string, text: string): Promise<void> {
-  const kv = redis();
-  if (kv) await kv.set(transcriptKey(guid), text, { ex: CACHE_TTL_SECONDS });
+  await tryRedis(
+    'transcript_set',
+    (kv) => kv.set(transcriptKey(guid), text, { ex: CACHE_TTL_SECONDS }),
+    null,
+  );
 }
 
 /** Fetch a published (RSS) transcript file and convert it, keeping times. */

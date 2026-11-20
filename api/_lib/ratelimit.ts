@@ -1,11 +1,12 @@
 // Per-IP rate limiting for the expensive endpoints, backed by the same Upstash
 // Redis used for caching. Protects your Anthropic + AssemblyAI keys from anyone
 // who finds the public URL. Fails OPEN when Redis isn't configured (so demo mode
-// and local dev still work) — with Upstash set, the caps are enforced.
+// and local dev still work) or can't be reached (so a Redis outage doesn't take
+// the app down) — with Upstash set and up, the caps are enforced.
 
 import { Ratelimit } from '@upstash/ratelimit';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { redis } from './redis.js';
+import { markRedisDown, redis } from './redis.js';
 
 function clientIp(req: VercelRequest): string {
   const xff = req.headers['x-forwarded-for'];
@@ -49,9 +50,21 @@ export interface RateResult {
  *   - a GLOBAL all-callers cap, so many IPs can't multiply the per-IP budget
  *     into a big bill. This is the "the deployment can never spend more than
  *     X/hour, period" backstop.
- * Returns null when Redis isn't configured (not enforced).
+ * Returns null when Redis isn't configured or can't be reached (not enforced).
  */
 export async function rateLimit(
+  req: VercelRequest,
+  opts: { name: string; perHour: number; globalPerHour?: number },
+): Promise<RateResult | null> {
+  try {
+    return await checkLimits(req, opts);
+  } catch (err) {
+    markRedisDown(`ratelimit_${opts.name}`, err);
+    return null;
+  }
+}
+
+async function checkLimits(
   req: VercelRequest,
   opts: { name: string; perHour: number; globalPerHour?: number },
 ): Promise<RateResult | null> {
