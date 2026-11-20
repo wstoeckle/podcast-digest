@@ -5,7 +5,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { FeedResult } from '../src/types.js';
 import { parseFeed } from '../src/lib/rss.js';
 import { fetchWithTimeout, methodNotAllowed, safeRemoteUrl, str } from './_lib/http.js';
-import { redis } from './_lib/redis.js';
+import { tryRedis } from './_lib/redis.js';
 
 const MAX_EPISODES = 300;
 
@@ -18,16 +18,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
   const key = `feed:${feedUrl.toString()}`;
-  const kv = redis();
-
   try {
-    if (kv) {
-      const cached = await kv.get<FeedResult>(key);
-      if (cached) {
-        res.setHeader('Cache-Control', 's-maxage=600');
-        res.status(200).json(cached);
-        return;
-      }
+    const cached = await tryRedis('feed_get', (kv) => kv.get<FeedResult>(key), null);
+    if (cached) {
+      res.setHeader('Cache-Control', 's-maxage=600');
+      res.status(200).json(cached);
+      return;
     }
 
     const r = await fetchWithTimeout(feedUrl.toString(), 15000);
@@ -41,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       parsed.episodes = parsed.episodes.slice(0, MAX_EPISODES);
     }
 
-    if (kv) await kv.set(key, parsed, { ex: 900 });
+    await tryRedis('feed_set', (kv) => kv.set(key, parsed, { ex: 900 }), null);
 
     res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=3600');
     res.status(200).json(parsed);

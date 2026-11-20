@@ -24,9 +24,12 @@ import {
   type OvernightStore,
 } from './_lib/overnight.js';
 import { rateLimit, tooMany } from './_lib/ratelimit.js';
-import { redis } from './_lib/redis.js';
+import { isRedisDown, markRedisDown, redis } from './_lib/redis.js';
 import { sttProvider } from './_lib/stt.js';
 import { findExistingTranscript } from './_lib/transcripts.js';
+
+const REDIS_DOWN =
+  "Overnight digests are paused: the server can't reach its Redis database right now.";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
@@ -35,21 +38,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET' && isCron(req)) return void (await nightly(res, kv));
 
   if (!kv || !hasClaude()) {
-    res.status(200).json({
-      available: false,
-      reason: !kv
-        ? 'Overnight digests need Upstash Redis set up on the server.'
-        : 'Overnight digests need an ANTHROPIC_API_KEY on the server.',
-      scheduled: false,
-      following: 0,
-      shows: [],
-      pending: 0,
-      items: [],
-    } satisfies OvernightStatus);
+    res
+      .status(200)
+      .json(
+        unavailable(
+          !kv
+            ? isRedisDown()
+              ? REDIS_DOWN
+              : 'Overnight digests need Upstash Redis set up on the server.'
+            : 'Overnight digests need an ANTHROPIC_API_KEY on the server.',
+        ),
+      );
     return;
   }
-  const store = redisStore(kv);
 
+  // Everything from here reads or writes Redis. If it can't be reached, say so
+  // (and keep the rest of the app working) instead of failing the request.
+  try {
+    await serve(req, res, redisStore(kv));
+  } catch (err) {
+    markRedisDown('overnight', err);
+    if (req.method === 'POST') res.status(503).json({ error: REDIS_DOWN });
+    else res.status(200).json(unavailable(REDIS_DOWN));
+  }
+}
+
+function unavailable(reason: string): OvernightStatus {
+  return {
+    available: false,
+    reason,
+    scheduled: false,
+    following: 0,
+    shows: [],
+    pending: 0,
+    items: [],
+  };
+}
+
+async function serve(req: VercelRequest, res: VercelResponse, store: OvernightStore) {
   if (req.method === 'GET') {
     // Pick up finished batches and transcriptions, at most once a minute.
     if (await store.set('ov:collect', 1, { nx: true, ex: 60 })) {
@@ -99,12 +125,19 @@ function isCron(req: VercelRequest): boolean {
 /** The nightly run. */
 async function nightly(res: VercelResponse, kv: Redis | null) {
   if (!kv || !hasClaude()) {
-    res.status(200).json({ skipped: 'Redis or ANTHROPIC_API_KEY not configured' });
+    res.status(200).json({
+      skipped: isRedisDown() ? 'Redis unreachable' : 'Redis or ANTHROPIC_API_KEY not configured',
+    });
     return;
   }
-  const summary = await runOvernight(deps(redisStore(kv)), config(), 'nightly');
-  console.log(JSON.stringify({ event: 'overnight_run', ...summary }));
-  res.status(200).json(summary);
+  try {
+    const summary = await runOvernight(deps(redisStore(kv)), config(), 'nightly');
+    console.log(JSON.stringify({ event: 'overnight_run', ...summary }));
+    res.status(200).json(summary);
+  } catch (err) {
+    markRedisDown('overnight_nightly', err);
+    res.status(503).json({ error: REDIS_DOWN });
+  }
 }
 
 function status(store: OvernightStore): Promise<OvernightStatus> {

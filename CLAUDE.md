@@ -150,6 +150,11 @@ returns `null` when unconfigured):
 - No `ANTHROPIC_API_KEY` → digest/ask return canned sample content.
 - No `ASSEMBLYAI_API_KEY` → transcript falls back to a canned sample transcript.
 - No Upstash env → nothing is cached (work is redone), but everything still runs.
+- Upstash set but unreachable (database deleted, outage) → the same as no
+  Upstash: the first failed call logs `redis_unavailable` and Redis is skipped
+  for a minute (`tryRedis` / `markRedisDown` in `api/_lib/redis.ts`). Rate
+  limits fail open meanwhile, and overnight digests report themselves paused.
+  Never call Redis outside `tryRedis` (or a try/catch that marks it down).
 
 This keeps the whole UI clickable — and end-to-end testable — with zero secrets.
 Add real keys to light up real episodes.

@@ -8,7 +8,7 @@ import type { AskEvent, ChatTurn } from '../src/types.js';
 import { streamAnswer } from './_lib/anthropic.js';
 import { jsonBody, methodNotAllowed, str } from './_lib/http.js';
 import { llmGlobalPerHour, llmPerHour, rateLimit, tooMany } from './_lib/ratelimit.js';
-import { redis } from './_lib/redis.js';
+import { getCachedTranscript } from './_lib/transcripts.js';
 
 // Input-size ceilings: the transcript is already clamped in anthropic.ts, but
 // an unbounded question or history would let one request smuggle megabytes of
@@ -43,8 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const guid = str(body.guid);
-  const kv = redis();
-  const transcript = str(body.transcript) ?? (guid && kv ? await kv.get<string>(`t:${guid}`) : null);
+  const transcript = str(body.transcript) ?? (guid ? await getCachedTranscript(guid) : null);
   if (!transcript) {
     res.status(400).json({ error: 'no transcript available for this episode' });
     return;

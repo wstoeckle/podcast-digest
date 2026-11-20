@@ -59,7 +59,7 @@ All optional (see `.env.example`). Set them in your Vercel project (or
 | `DIGEST_MODEL` (optional)                         | Model override; default `claude-opus-5-5`. Set `claude-haiku-5-5` for much cheaper runs. |
 | `DIGEST_EFFORT` / `ASK_EFFORT` (optional)         | How hard Claude thinks: `low`, `medium`, `high`, `xhigh`, `max`. Defaults `medium` (digest) / `low` (Q&A). Lower is faster and cheaper. |
 | `ASSEMBLYAI_API_KEY`                              | Auto-transcription of episodes without a published transcript. |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Caching transcripts + digests, **and per-IP rate limiting** on the paid endpoints. Vercel's `KV_REST_API_URL` / `KV_REST_API_TOKEN` work too (Storage → Create Database → Upstash sets those). |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Caching transcripts + digests, **and per-IP rate limiting** on the paid endpoints. Vercel's `KV_REST_API_URL` / `KV_REST_API_TOKEN` work too (Storage → Create Database → Upstash sets those). If the database can't be reached, the app keeps working without it (no cache or limits) and logs `redis_unavailable`. |
 | `RL_LLM_PER_HOUR` / `RL_STT_PER_HOUR` (optional) | Per-IP hourly caps for digest+Q&A / new transcriptions. Defaults 40 / 15. |
 | `RL_LLM_GLOBAL_PER_HOUR` / `RL_STT_GLOBAL_PER_HOUR` (optional) | Whole-deployment hourly ceilings across all callers combined. Defaults 150 / 30. |
 | `CRON_SECRET`                                     | Turns on the nightly overnight-digest run (Vercel Cron sends it). Any long random string. |
