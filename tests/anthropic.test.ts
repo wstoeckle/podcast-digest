@@ -123,7 +123,7 @@ describe('generateDigest', () => {
   it('asks Opus 5.5 for schema-shaped output at medium effort with refusal fallbacks on', async () => {
     stubFetch(() => message([{ type: 'text', text: JSON.stringify(reply) }]));
     const { generateDigest } = await load();
-    await generateDigest(TRANSCRIPT, { episodeTitle: 'Ep' });
+    await generateDigest(TRANSCRIPT, { episodeTitle: 'Ep' }, 'sk-test');
 
     const [call] = calls;
     expect(call?.url).toContain('/v1/messages');
@@ -142,7 +142,7 @@ describe('generateDigest', () => {
   it('keeps only verbatim quotes', async () => {
     stubFetch(() => message([{ type: 'text', text: JSON.stringify(reply) }]));
     const { generateDigest } = await load();
-    const d = await generateDigest(TRANSCRIPT, {});
+    const d = await generateDigest(TRANSCRIPT, {}, 'sk-test');
     expect(d.quotes).toEqual([{ text: 'The batteries got cheap, and once they got cheap' }]);
     expect(d.outline).toEqual(reply.outline);
   });
@@ -155,13 +155,13 @@ describe('generateDigest', () => {
       ]),
     );
     const { generateDigest } = await load();
-    expect((await generateDigest(TRANSCRIPT, {})).tldr).toBe(reply.tldr);
+    expect((await generateDigest(TRANSCRIPT, {}, 'sk-test')).tldr).toBe(reply.tldr);
   });
 
   it('turns a refusal into a plain error', async () => {
     stubFetch(() => message([], 'refusal'));
     const { generateDigest } = await load();
-    await expect(generateDigest(TRANSCRIPT, {})).rejects.toThrow(/declined/);
+    await expect(generateDigest(TRANSCRIPT, {}, 'sk-test')).rejects.toThrow(/declined/);
   });
 
   it('leaves out fallbacks and effort where the model would reject them', async () => {
@@ -169,7 +169,7 @@ describe('generateDigest', () => {
       message([{ type: 'text', text: JSON.stringify(reply) }], 'end_turn', 'claude-haiku-4-5'),
     );
     const { generateDigest } = await load({ DIGEST_MODEL: 'claude-haiku-4-5' });
-    await generateDigest(TRANSCRIPT, {});
+    await generateDigest(TRANSCRIPT, {}, 'sk-test');
     expect(calls[0]?.body).not.toHaveProperty('fallbacks');
     expect(calls[0]?.headers.get('anthropic-beta') ?? '').not.toContain('server-side-fallback');
     expect(calls[0]?.body.output_config).toEqual({ format: expect.any(Object) });
@@ -183,7 +183,7 @@ describe('generateDigest', () => {
       DIGEST_MODEL: 'claude-haiku-5-5',
       DIGEST_EFFORT: 'low',
     });
-    await generateDigest(TRANSCRIPT, {});
+    await generateDigest(TRANSCRIPT, {}, 'sk-test');
     expect(calls[0]?.body).toMatchObject({
       model: 'claude-haiku-5-5',
       output_config: { effort: 'low' },
@@ -198,6 +198,7 @@ describe('streamAnswer', () => {
     const { streamAnswer } = await load();
     let out = '';
     await streamAnswer({
+      apiKey: 'sk-test',
       transcript: TRANSCRIPT,
       meta: {},
       history: [
@@ -240,6 +241,7 @@ describe('streamAnswer', () => {
     const { streamAnswer } = await load();
     let out = '';
     await streamAnswer({
+      apiKey: 'sk-test',
       transcript: TRANSCRIPT,
       meta: {},
       history: [],
@@ -269,6 +271,7 @@ describe('streamAnswer', () => {
     const { streamAnswer } = await load();
     const events: unknown[] = [];
     await streamAnswer({
+      apiKey: 'sk-test',
       transcript: timed,
       meta: {},
       history: [],

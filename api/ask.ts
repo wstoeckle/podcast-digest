@@ -5,7 +5,8 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { AskEvent, ChatTurn } from '../src/types.js';
-import { streamAnswer } from './_lib/anthropic.js';
+import { CLAUDE_KEY_REJECTED, NEEDS_CLAUDE_KEY, access } from './_lib/access.js';
+import { isKeyRejected, streamAnswer } from './_lib/anthropic.js';
 import { jsonBody, methodNotAllowed, str } from './_lib/http.js';
 import { llmGlobalPerHour, llmPerHour, rateLimit, tooMany } from './_lib/ratelimit.js';
 import { getCachedTranscript } from './_lib/transcripts.js';
@@ -49,16 +50,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  const { claude } = access(req);
+  if (claude.use === 'locked') {
+    res.status(401).json({ error: NEEDS_CLAUDE_KEY, code: 'needs_key' });
+    return;
+  }
+
   const meta = { showTitle: str(body.showTitle), episodeTitle: str(body.episodeTitle) };
   const history = toHistory(body.history);
 
-  // Every question is a model call — meter before we start streaming.
-  const rl = await rateLimit(req, {
-    name: 'llm',
-    perHour: llmPerHour(),
-    globalPerHour: llmGlobalPerHour(),
-  });
-  if (rl && !rl.ok) return tooMany(res, rl);
+  // Every question on the app's key is a model call — meter before streaming.
+  // A caller's own key is theirs to spend.
+  if (claude.use === 'server') {
+    const rl = await rateLimit(req, {
+      name: 'llm',
+      perHour: llmPerHour(),
+      globalPerHour: llmGlobalPerHour(),
+    });
+    if (rl && !rl.ok) return tooMany(res, rl);
+  }
 
   // Newline-delimited JSON: text chunks and the transcript passages they cite.
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -67,9 +77,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const send = (event: AskEvent) => res.write(`${JSON.stringify(event)}\n`);
 
   try {
-    await streamAnswer({ transcript, meta, history, question, onEvent: send });
+    await streamAnswer({ transcript, meta, history, question, onEvent: send, apiKey: claude.key });
   } catch (err) {
-    if (!res.writableEnded) send({ type: 'error', message: (err as Error).message });
+    const message =
+      claude.use === 'caller' && isKeyRejected(err) ? CLAUDE_KEY_REJECTED : (err as Error).message;
+    if (!res.writableEnded) send({ type: 'error', message });
   }
   res.end();
 }

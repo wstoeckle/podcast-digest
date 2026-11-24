@@ -10,30 +10,57 @@ import type {
   TranscriptResponse,
   ChatTurn,
   OvernightStatus,
+  AccessStatus,
+  KeyErrorCode,
 } from '../types';
+import { keyHeaders } from '../lib/keys';
+
+/**
+ * A failed request. `code` is set when it's about API keys (one is needed, or
+ * yours was refused), so the screen can point to Settings.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly code?: KeyErrorCode,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/** The key error code of a thrown error, if it has one. */
+export function keyErrorCode(err: unknown): KeyErrorCode | undefined {
+  return err instanceof ApiError ? err.code : undefined;
+}
 
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error((await errMessage(res)) || `request failed (${res.status})`);
+  // Every request carries this device's own keys and owner code, if it has any.
+  const res = await fetch(url, { headers: keyHeaders() });
+  if (!res.ok) throw await apiError(res);
   return (await res.json()) as T;
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...keyHeaders() },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error((await errMessage(res)) || `request failed (${res.status})`);
+  if (!res.ok) throw await apiError(res);
   return (await res.json()) as T;
 }
 
-async function errMessage(res: Response): Promise<string> {
+async function apiError(
+  res: Response,
+  fallback = `request failed (${res.status})`,
+): Promise<ApiError> {
   try {
-    const data = (await res.clone().json()) as { error?: string };
-    return data.error ?? '';
+    const data = (await res.clone().json()) as { error?: string; code?: string };
+    const code = data.code === 'needs_key' || data.code === 'key_rejected' ? data.code : undefined;
+    return new ApiError(data.error || fallback, code);
   } catch {
-    return '';
+    return new ApiError(fallback);
   }
 }
 
@@ -104,13 +131,11 @@ export async function streamAsk(
 ): Promise<void> {
   const res = await fetch('/api/ask', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...keyHeaders() },
     body: JSON.stringify(input),
     signal,
   });
-  if (!res.ok || !res.body) {
-    throw new Error((await errMessage(res)) || `ask failed (${res.status})`);
-  }
+  if (!res.ok || !res.body) throw await apiError(res, `ask failed (${res.status})`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -153,4 +178,9 @@ export type OvernightSync =
 
 export function syncOvernight(body: OvernightSync): Promise<OvernightStatus> {
   return postJson('/api/overnight', body);
+}
+
+/** Whose keys this device uses; with `check`, whether its own keys work (free calls). */
+export function getAccess(check = false): Promise<AccessStatus> {
+  return getJson(`/api/access${check ? '?check=1' : ''}`);
 }

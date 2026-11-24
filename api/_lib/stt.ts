@@ -140,12 +140,26 @@ async function safeText(res: Response): Promise<string> {
   }
 }
 
-export function hasStt(): boolean {
-  return Boolean(process.env.ASSEMBLYAI_API_KEY);
+/** A provider spending `key` (default: the app's own, for the overnight run). */
+export function sttProvider(key = process.env.ASSEMBLYAI_API_KEY): SttProvider | null {
+  return key ? new AssemblyAI(key) : null;
 }
 
-export function sttProvider(): SttProvider | null {
-  const key = process.env.ASSEMBLYAI_API_KEY;
-  if (!key) return null;
-  return new AssemblyAI(key);
+/** Whether AssemblyAI accepts a key, by listing transcripts (free). */
+export async function checkSttKey(key: string): Promise<'ok' | 'rejected' | 'unknown'> {
+  try {
+    const res = await fetch(`${AAI_BASE}?limit=1`, {
+      headers: { authorization: key },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) return 'ok';
+    return res.status === 401 || res.status === 403 ? 'rejected' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** True when AssemblyAI refused the key (its errors carry the HTTP status). */
+export function isSttKeyRejected(err: unknown): boolean {
+  return err instanceof Error && /AssemblyAI (submit|poll) failed: (401|403)\b/.test(err.message);
 }

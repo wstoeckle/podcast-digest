@@ -67,6 +67,31 @@ export interface TranscriptResponse {
   /** STT job id to poll with (status === 'processing'); client echoes it back. */
   jobId?: string;
   error?: string;
+  /** Set when the error is about API keys, so the app can point to Settings. */
+  code?: KeyErrorCode;
+}
+
+/** A key is needed (none given, and the app's own is the owner's) or was refused. */
+export type KeyErrorCode = 'needs_key' | 'key_rejected';
+
+/**
+ * How a device's requests get a key for one service (api/_lib/access.ts):
+ * its own key, the app's (owner), none allowed (the app's key is the owner's),
+ * or none anywhere (demo content).
+ */
+export type KeyUse = 'caller' | 'server' | 'locked' | 'demo';
+
+/** GET /api/access: whose keys this device uses. */
+export interface AccessStatus {
+  /** This device is the app's owner (its owner code matched, or the app has none). */
+  owner: boolean;
+  /** The app has an owner code set. */
+  ownerCode: boolean;
+  claude: KeyUse;
+  stt: KeyUse;
+  /** With ?check=1: whether the device's own keys work. */
+  claudeKey?: 'ok' | 'rejected' | 'unknown';
+  sttKey?: 'ok' | 'rejected' | 'unknown';
 }
 
 export interface OutlineItem {

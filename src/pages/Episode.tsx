@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { Digest, Episode as Ep, TranscriptResponse } from '../types';
-import { fetchFeed, getDigest, pollTranscript, startTranscript } from '../net/api';
+import type { Digest, Episode as Ep, KeyErrorCode, TranscriptResponse } from '../types';
+import {
+  ApiError,
+  fetchFeed,
+  getDigest,
+  keyErrorCode,
+  pollTranscript,
+  startTranscript,
+} from '../net/api';
 import { inLibrary, saveToLibrary, toggleLibrary } from '../lib/library';
 import { addToPlaylist, inPlaylist } from '../lib/playlist';
 import DigestView from '../components/DigestView';
@@ -9,6 +16,7 @@ import { rememberDigest, markHeard } from '../lib/listening';
 import AskChat from '../components/AskChat';
 import EpisodeAudio, { type EpisodeAudioHandle } from '../components/EpisodeAudio';
 import PasteTranscript from '../components/PasteTranscript';
+import KeyPrompt from '../components/KeyPrompt';
 
 type Phase = 'loading' | 'transcribing' | 'summarizing' | 'ready' | 'error';
 
@@ -35,6 +43,7 @@ export default function Episode() {
   const [source, setSource] = useState<TranscriptResponse['source']>();
   const [digest, setDigest] = useState<Digest | null>(null);
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState<KeyErrorCode>();
   const [saved, setSaved] = useState(false);
   const [queued, setQueued] = useState(false);
   // Each run() gets its own cancellation token, and starting a new run cancels
@@ -54,6 +63,7 @@ export default function Episode() {
       const alive = () => mounted.current && !token.cancelled;
       setPhase('loading');
       setError('');
+      setErrorCode(undefined);
       setDigest(null);
       if (!opts?.pasted) setTranscript('');
 
@@ -93,12 +103,17 @@ export default function Episode() {
         });
         if (!alive()) return;
         setDigest(d);
-        if (!d.demo) rememberDigest({
-          guid: resolved.ep.guid, showTitle: resolved.showTitle, episodeTitle: resolved.ep.title,
-          ...(resolved.feedUrl ? { feedUrl: resolved.feedUrl } : {}),
-          ...(resolved.artwork ? { artwork: resolved.artwork } : {}),
-          tldr: d.tldr, bullets: d.bullets, topics: d.topics,
-        });
+        if (!d.demo)
+          rememberDigest({
+            guid: resolved.ep.guid,
+            showTitle: resolved.showTitle,
+            episodeTitle: resolved.ep.title,
+            ...(resolved.feedUrl ? { feedUrl: resolved.feedUrl } : {}),
+            ...(resolved.artwork ? { artwork: resolved.artwork } : {}),
+            tldr: d.tldr,
+            bullets: d.bullets,
+            topics: d.topics,
+          });
         setPhase('ready');
 
         // Auto-save to the library so a processed episode is never lost. We only
@@ -118,6 +133,7 @@ export default function Episode() {
       } catch (err) {
         if (!alive()) return;
         setError((err as Error).message);
+        setErrorCode(keyErrorCode(err));
         setPhase('error');
       }
     },
@@ -193,6 +209,7 @@ export default function Episode() {
         <>
           <div className="panel">
             <p className="error">{error}</p>
+            <KeyPrompt code={errorCode} />
             <button className="btn" onClick={() => run()}>
               Try again
             </button>
@@ -222,10 +239,23 @@ export default function Episode() {
               </Link>
             )}
           </div>
-          <DigestView digest={digest} sourceLabel={sourceLabel(source)} onSeek={ctx.ep.audioUrl ? seek : undefined} onComplete={() => {
-            if (!digest.demo && ctx) markHeard({ guid: ctx.ep.guid, showTitle: ctx.showTitle, episodeTitle: ctx.ep.title,
-              ...(ctx.feedUrl ? { feedUrl: ctx.feedUrl } : {}), tldr: digest.tldr, bullets: digest.bullets, addedAt: Date.now() });
-          }} />
+          <DigestView
+            digest={digest}
+            sourceLabel={sourceLabel(source)}
+            onSeek={ctx.ep.audioUrl ? seek : undefined}
+            onComplete={() => {
+              if (!digest.demo && ctx)
+                markHeard({
+                  guid: ctx.ep.guid,
+                  showTitle: ctx.showTitle,
+                  episodeTitle: ctx.ep.title,
+                  ...(ctx.feedUrl ? { feedUrl: ctx.feedUrl } : {}),
+                  tldr: digest.tldr,
+                  bullets: digest.bullets,
+                  addedAt: Date.now(),
+                });
+            }}
+          />
           {ctx.ep.audioUrl && <EpisodeAudio ref={audioRef} src={ctx.ep.audioUrl} />}
           {(source === 'demo' || source === 'stt') && (
             <PasteTranscript
@@ -345,7 +375,8 @@ async function obtainTranscript(
     setSource(start.source);
     return start.text;
   }
-  if (start.status === 'error') throw new Error(start.error ?? 'transcription failed');
+  if (start.status === 'error')
+    throw new ApiError(start.error ?? 'transcription failed', start.code);
   // Nothing published: the audio is being transcribed.
   setSource('stt');
 
@@ -360,7 +391,7 @@ async function obtainTranscript(
       setSource(r.source);
       return r.text;
     }
-    if (r.status === 'error') throw new Error(r.error ?? 'transcription failed');
+    if (r.status === 'error') throw new ApiError(r.error ?? 'transcription failed', r.code);
     if (r.jobId) jobId = r.jobId;
   }
   return null;

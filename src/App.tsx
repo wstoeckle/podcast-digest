@@ -6,6 +6,7 @@ import Show from './pages/Show';
 import Episode from './pages/Episode';
 import Playlist from './pages/Playlist';
 import ForYou from './pages/ForYou';
+import Settings from './pages/Settings';
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/episode" element={<Episode />} />
           <Route path="/for-you" element={<ForYou />} />
           <Route path="/playlist" element={<Playlist />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
