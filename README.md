@@ -59,6 +59,7 @@ All optional (see `.env.example`). Set them in your Vercel project (or
 | `DIGEST_MODEL` (optional)                         | Model override; default `claude-opus-5-5`. Set `claude-haiku-5-5` for much cheaper runs. |
 | `DIGEST_EFFORT` / `ASK_EFFORT` (optional)         | How hard Claude thinks: `low`, `medium`, `high`, `xhigh`, `max`. Defaults `medium` (digest) / `low` (Q&A). Lower is faster and cheaper. |
 | `ASSEMBLYAI_API_KEY`                              | Auto-transcription of episodes without a published transcript. |
+| `ASSEMBLYAI_SPEECH_MODEL` (optional)              | AssemblyAI model; default `universal-2` ($0.15/hr). Set `assemblyai-stt-3-7` for AssemblyAI's newest, most accurate model ($0.21/hr). |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Caching transcripts + digests, **and per-IP rate limiting** on the paid endpoints. Vercel's `KV_REST_API_URL` / `KV_REST_API_TOKEN` work too (Storage → Create Database → Upstash sets those). If the database can't be reached, the app keeps working without it (no cache or limits) and logs `redis_unavailable`. |
 | `RL_LLM_PER_HOUR` / `RL_STT_PER_HOUR` (optional) | Per-IP hourly caps for digest+Q&A / new transcriptions. Defaults 40 / 15. |
 | `RL_LLM_GLOBAL_PER_HOUR` / `RL_STT_GLOBAL_PER_HOUR` (optional) | Whole-deployment hourly ceilings across all callers combined. Defaults 150 / 30. |
@@ -134,9 +135,18 @@ run your own copy:
 
 Total cost at personal scale is small: Claude per digest (an estimated 5–15¢
 for an hour-long episode on the default Claude Opus 5.5, under a cent with
-`DIGEST_MODEL=claude-haiku-5-5`; each call logs its token use), AssemblyAI only for episodes
-without a published transcript (in the feed or on the show's website) (or paste one in — free), Upstash and Vercel
-free tiers are plenty.
+`DIGEST_MODEL=claude-haiku-5-5`; each call logs its token use), AssemblyAI
+(about $0.17 per audio hour with speaker labels) only for episodes without a
+published transcript in the feed or on the show's website (or paste one in —
+free). Upstash and Vercel free tiers are plenty.
+
+**Claude Max, Ultra and Team plans include monthly Claude API credits** ($100,
+$200, and up to $500 pooled). Claim them on claude.ai under Settings → Billing
+→ API credits, linking the Console organization your `ANTHROPIC_API_KEY`
+belongs to, and they pay for this app's digests and Q&A. A plan links to one
+organization and only support can change it, so pick that one. Pro plans
+don't include API credits; see
+https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers.
 
 ### History
 

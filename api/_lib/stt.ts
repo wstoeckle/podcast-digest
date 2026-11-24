@@ -15,6 +15,20 @@ export interface SttProvider {
 
 const AAI_BASE = 'https://api.assemblyai.com/v2/transcript';
 
+/**
+ * AssemblyAI's model, from ASSEMBLYAI_SPEECH_MODEL. Default `universal-2`
+ * ($0.15/hr + $0.02/hr speaker labels): about 30% cheaper than the account
+ * default (`assemblyai-stt-3-7`, $0.21/hr) and plenty for spoken podcasts.
+ */
+export function assemblyAiModel(): string {
+  return process.env.ASSEMBLYAI_SPEECH_MODEL?.trim() || 'universal-2';
+}
+
+/** The body of a transcription request for an episode's audio. */
+export function assemblyAiRequest(audioUrl: string): Record<string, unknown> {
+  return { audio_url: audioUrl, speech_models: [assemblyAiModel()], speaker_labels: true };
+}
+
 class AssemblyAI implements SttProvider {
   constructor(private key: string) {}
 
@@ -22,7 +36,7 @@ class AssemblyAI implements SttProvider {
     const res = await fetch(AAI_BASE, {
       method: 'POST',
       headers: { authorization: this.key, 'content-type': 'application/json' },
-      body: JSON.stringify({ audio_url: audioUrl, speaker_labels: true }),
+      body: JSON.stringify(assemblyAiRequest(audioUrl)),
     });
     if (!res.ok) {
       throw new Error(`AssemblyAI submit failed: ${res.status} ${await safeText(res)}`);
