@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { assemblyAiText } from '../api/_lib/stt';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { assemblyAiRequest, assemblyAiText } from '../api/_lib/stt';
 
 const w = (text: string, start: number) => ({ text, start });
 
@@ -37,5 +37,27 @@ describe('assemblyAiText', () => {
   it('falls back to the flat text', () => {
     expect(assemblyAiText({ status: 'completed', text: 'just text' })).toBe('just text');
     expect(assemblyAiText({ status: 'completed' })).toBeUndefined();
+  });
+});
+
+describe('assemblyAiRequest', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('asks for Universal-2 with speaker labels by default', () => {
+    vi.stubEnv('ASSEMBLYAI_SPEECH_MODEL', '');
+    expect(assemblyAiRequest('https://cdn.test/ep.mp3')).toEqual({
+      audio_url: 'https://cdn.test/ep.mp3',
+      speech_models: ['universal-2'],
+      speaker_labels: true,
+    });
+  });
+
+  it('takes a different model from ASSEMBLYAI_SPEECH_MODEL', () => {
+    vi.stubEnv('ASSEMBLYAI_SPEECH_MODEL', 'assemblyai-stt-3-7');
+    expect(assemblyAiRequest('https://cdn.test/ep.mp3').speech_models).toEqual([
+      'assemblyai-stt-3-7',
+    ]);
   });
 });
