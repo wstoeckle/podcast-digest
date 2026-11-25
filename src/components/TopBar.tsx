@@ -14,9 +14,9 @@ export default function TopBar() {
   const [theme, setTheme] = useState<Theme>(() => storedTheme());
   return (
     <header className="topbar">
-      <Link to="/" className="brand">
+      <Link to="/" className="brand" aria-label="Podcast Digest home">
         <BrandMark />
-        <span>Podcast Digest</span>
+        <span className="brand-name">Podcast Digest</span>
       </Link>
       <span className="spacer" />
       <Link to="/for-you" className="for-you-link">
