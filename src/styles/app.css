@@ -925,3 +925,18 @@ button {
   margin: 0 0 0.6rem;
   line-height: 1.5;
 }
+
+/* The smallest phones (320px): keep the logo, drop the wordmark, so every
+   top-bar button stays on screen. */
+@media (max-width: 360px) {
+  .topbar .brand-name {
+    display: none;
+  }
+}
+
+/* Let text inputs shrink below their default width, so a field and its button
+   share a narrow row instead of pushing past the screen edge. */
+.field,
+.field input {
+  min-width: 0;
+}

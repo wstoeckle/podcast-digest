@@ -7,7 +7,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: 'auto',
+      // Registered from src/pwa/registerUpdates.ts, which also checks for new
+      // versions when the app returns to the foreground.
+      injectRegister: false,
       includeAssets: ['icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'],
       manifest: false, // we ship our own /manifest.webmanifest
       workbox: {
