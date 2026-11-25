@@ -7,6 +7,11 @@
 //
 // STT job tracking uses a client-echoed jobId, so this works with or without
 // Redis (Redis only caches the final text to avoid re-transcribing).
+//
+// Finding a published transcript is free and open to everyone. Transcribing
+// spends an AssemblyAI key: the caller's own, or the app's for its owner (see
+// access.ts). A pasted transcript is returned, not cached: the shared cache only
+// holds transcripts the server found or made itself.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { TranscriptLink, TranscriptResponse } from '../src/types.js';
@@ -14,7 +19,8 @@ import { toTimedTranscript } from '../src/lib/transcriptFormats.js';
 import { DEMO_TRANSCRIPT, MAX_TRANSCRIPT_CHARS } from '../src/lib/digestPrompt.js';
 import { jsonBody, methodNotAllowed, safeRemoteUrl, str } from './_lib/http.js';
 import { rateLimit, sttGlobalPerHour, sttPerHour, tooMany } from './_lib/ratelimit.js';
-import { hasStt, sttProvider } from './_lib/stt.js';
+import { NEEDS_STT_KEY, STT_KEY_REJECTED, access } from './_lib/access.js';
+import { isSttKeyRejected, sttProvider } from './_lib/stt.js';
 import {
   findExistingTranscript,
   getCachedTranscript as getCached,
@@ -35,12 +41,11 @@ async function startOrReturn(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // 0) A transcript the user pasted in wins over everything and refreshes the
-  // cache. This lets people digest shows whose transcripts live on the web but
-  // not in the RSS feed, and skips STT entirely — free, instant, and higher
-  // quality than machine transcription. It's also how you fix a bad auto-transcript.
-  // Clamp before caching: anything past the model's ceiling would only bloat
-  // Redis (the model input is clamped again in anthropic.ts regardless).
+  // 0) A transcript the user pasted in wins over everything. This lets people
+  // digest shows whose transcripts the finder misses, and skips STT entirely —
+  // free, instant, and higher quality than machine transcription. It's also how
+  // you work around a bad auto-transcript. It stays with the user (the app sends
+  // it along for the digest and Q&A); it never replaces the shared cached one.
   const pasted = str(body.transcript)?.slice(0, MAX_TRANSCRIPT_CHARS * 2);
   if (pasted) {
     // Keeps timestamps when the pasted text has them, so the outline can link into the audio.
@@ -52,7 +57,6 @@ async function startOrReturn(req: VercelRequest, res: VercelResponse) {
       } satisfies TranscriptResponse);
       return;
     }
-    await putCached(guid, text);
     res.status(200).json({ status: 'ready', text, source: 'pasted' } satisfies TranscriptResponse);
     return;
   }
@@ -76,18 +80,18 @@ async function startOrReturn(req: VercelRequest, res: VercelResponse) {
   });
   if (found) {
     await putCached(guid, found.text);
-    res
-      .status(200)
-      .json({
-        status: 'ready',
-        text: found.text,
-        source: found.source,
-      } satisfies TranscriptResponse);
+    res.status(200).json({
+      status: 'ready',
+      text: found.text,
+      source: found.source,
+    } satisfies TranscriptResponse);
     return;
   }
 
-  // 2) No key configured → demo transcript so the flow stays clickable.
-  if (!hasStt()) {
+  // 2) No key anywhere → demo transcript so the flow stays clickable. The app
+  // has a key, but it's the owner's → ask for the caller's own.
+  const { stt } = access(req);
+  if (stt.use === 'demo') {
     res.status(200).json({
       status: 'ready',
       text: DEMO_TRANSCRIPT,
@@ -95,10 +99,18 @@ async function startOrReturn(req: VercelRequest, res: VercelResponse) {
     } satisfies TranscriptResponse);
     return;
   }
+  if (stt.use === 'locked') {
+    res.status(401).json({
+      status: 'error',
+      error: NEEDS_STT_KEY,
+      code: 'needs_key',
+    } satisfies TranscriptResponse);
+    return;
+  }
 
   // 3) Transcribe the audio via the STT provider (URL ingest, submit → poll).
   const audioUrl = safeRemoteUrl(str(body.audioUrl));
-  const provider = sttProvider();
+  const provider = sttProvider(stt.key);
   if (!audioUrl || !provider) {
     res.status(400).json({
       status: 'error',
@@ -107,23 +119,39 @@ async function startOrReturn(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // Submitting a job is the credit-consuming action — meter it here so cache /
-  // RSS-transcript / demo responses above never count against the budget.
-  const rl = await rateLimit(req, {
-    name: 'stt',
-    perHour: sttPerHour(),
-    globalPerHour: sttGlobalPerHour(),
-  });
-  if (rl && !rl.ok) return tooMany(res, rl);
+  // Submitting a job is the credit-consuming action — meter it here (on the
+  // app's key only) so cache / published-transcript / demo responses above
+  // never count against the budget.
+  if (stt.use === 'server') {
+    const rl = await rateLimit(req, {
+      name: 'stt',
+      perHour: sttPerHour(),
+      globalPerHour: sttGlobalPerHour(),
+    });
+    if (rl && !rl.ok) return tooMany(res, rl);
+  }
 
   try {
     const jobId = await provider.submit(audioUrl.toString());
     res.status(200).json({ status: 'processing', jobId } satisfies TranscriptResponse);
   } catch (err) {
-    res
-      .status(502)
-      .json({ status: 'error', error: (err as Error).message } satisfies TranscriptResponse);
+    sttFailed(res, err, stt.use === 'caller');
   }
+}
+
+/** A failed AssemblyAI call; a refused key of the caller's own points them to Settings. */
+function sttFailed(res: VercelResponse, err: unknown, callerKey: boolean) {
+  if (callerKey && isSttKeyRejected(err)) {
+    res.status(401).json({
+      status: 'error',
+      error: STT_KEY_REJECTED,
+      code: 'key_rejected',
+    } satisfies TranscriptResponse);
+    return;
+  }
+  res
+    .status(502)
+    .json({ status: 'error', error: (err as Error).message } satisfies TranscriptResponse);
 }
 
 async function pollJob(req: VercelRequest, res: VercelResponse) {
@@ -141,8 +169,10 @@ async function pollJob(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Poll with the key the job was submitted with (the app resends it).
   const jobId = str(req.query.jobId);
-  const provider = sttProvider();
+  const { stt } = access(req);
+  const provider = stt.key ? sttProvider(stt.key) : null;
   if (!jobId || !provider) {
     res.status(200).json({ status: 'processing' } satisfies TranscriptResponse);
     return;
@@ -162,9 +192,7 @@ async function pollJob(req: VercelRequest, res: VercelResponse) {
     if (result.error) out.error = result.error;
     res.status(200).json(out);
   } catch (err) {
-    res
-      .status(502)
-      .json({ status: 'error', error: (err as Error).message } satisfies TranscriptResponse);
+    sttFailed(res, err, stt.use === 'caller');
   }
 }
 

@@ -54,7 +54,9 @@ Both themes ship; the app follows `prefers-color-scheme` and a manual toggle.
 - **No accounts, no gates.** The library is personal and lives in `localStorage`.
   The one exception is opt-in: overnight digests share the shows you *pick*
   for them with the server (it has to know what to check). Following a show
-  never shares it. Off by default.
+  never shares it. Off by default. Your own API keys and the owner code
+  (Settings) live in `localStorage` too and ride along with each request; see
+  "Whose keys" below.
 - No dark patterns, no fake urgency.
 
 ### Voice
@@ -114,7 +116,9 @@ a jump can land a little off.
   markers).
   These have **no** DOM or Node dependencies so they run in tests, the browser,
   and serverless functions alike.
-- `src/net/api.ts` — the **only** browser module that calls `fetch`.
+- `src/net/api.ts` — the **only** browser module that calls `fetch`. Every
+  request carries this device's keys (`keyHeaders()` from `src/lib/keys.ts`);
+  key errors come back as `ApiError` with a `code` that shows a Settings link.
 - `src/lib/library.ts` — personal library in `localStorage`. `following.ts`
   (shows you follow, filled by OPML import or the Follow button) and
   `playlist.ts` (the listen queue; items embed their digest text so playback is
@@ -140,7 +144,31 @@ a jump can land a little off.
 | `POST /api/transcript`    | Pasted transcript → cache-first → published transcript (feed files, then the show's website) → submit STT job. `GET` polls it. |
 | `POST /api/digest`        | Cached transcript → Claude → `{ tldr, bullets, topics, outline, quotes }`. |
 | `POST /api/ask`           | Streamed answer as NDJSON `AskEvent`s: text + cited transcript passages. |
+| `GET /api/access`         | Whose keys this device uses (owner / its own / none); `?check=1` tests its own keys with free calls. |
 | `GET/POST /api/overnight` | Overnight digests: status + picked shows + collect (GET), add/remove picked shows (POST), nightly run (GET from Vercel Cron with `CRON_SECRET`). |
+
+### Whose keys (sharing the app)
+
+`api/_lib/access.ts` decides, per request, which key each paid call spends:
+the caller's own (headers `x-anthropic-key` / `x-assemblyai-key`, sent from
+`src/lib/keys.ts`), else the app's env keys **only for the owner** (header
+`x-owner-code` matches `OWNER_CODE`; with no `OWNER_CODE`, everyone is the
+owner). Otherwise the request is `locked`: a 401 with `code: 'needs_key'`, and
+the app points to Settings. `demo` means no key anywhere.
+
+- Every endpoint that spends a key calls `access(req)` and passes the key down
+  (`generateDigest(…, key)`, `streamAnswer({ apiKey })`, `sttProvider(key)`).
+  Never read `ANTHROPIC_API_KEY` / `ASSEMBLYAI_API_KEY` in a request path.
+- Rate limits meter only the app's keys (`use === 'server'`).
+- Free work stays open to everyone: search, feeds, finding published
+  transcripts, and cached digests.
+- Overnight digests and listening plans are owner-only (they run on the app's
+  accounts and one shared list of shows).
+- The shared cache only holds what the server found or made: a pasted
+  transcript is returned, not cached, and a digest of a transcript that differs
+  from the cached one is neither served from nor written to the cache.
+- Keys from headers are used for one request and never stored, logged, or
+  echoed back (`GET /api/access` reports only *whose* keys are in use).
 
 ### Graceful degradation ("demo mode")
 
@@ -220,6 +248,8 @@ Add real keys to light up real episodes.
 - Summaries that editorialize or add claims the transcript doesn't support.
 - Moving big audio files through the serverless function (transcode/upload) —
   the STT layer ingests the audio **by URL** on purpose. Keep it that way.
+- Spending the app's env keys for anyone but the owner, or storing, logging or
+  echoing a key that came in a header.
 - Loosening the website transcript finder. Summarizing show notes, or another
   episode's transcript, is worse than paying to transcribe: a page counts only
   if it's long enough for the episode and reads like a conversation, and only

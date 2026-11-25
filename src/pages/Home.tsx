@@ -9,6 +9,7 @@ import { hashId } from '../lib/rss';
 import { formatDate } from '../lib/format';
 import { isOvernightOn } from '../lib/overnight';
 import OvernightPanel from '../components/OvernightPanel';
+import KeyNotice from '../components/KeyNotice';
 
 type Mode = 'search' | 'paste';
 
@@ -159,6 +160,8 @@ export default function Home() {
         )}
         {error && <p className="error">{error}</p>}
       </section>
+
+      <KeyNotice />
 
       {shows && shows.length > 0 && (
         <section>

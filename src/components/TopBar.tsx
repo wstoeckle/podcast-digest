@@ -19,9 +19,19 @@ export default function TopBar() {
         <span>Podcast Digest</span>
       </Link>
       <span className="spacer" />
-      <Link to="/for-you" className="for-you-link">For you</Link>
+      <Link to="/for-you" className="for-you-link">
+        For you
+      </Link>
       <Link to="/playlist" className="icon-btn" title="Listen queue" aria-label="Listen queue">
         ♫
+      </Link>
+      <Link
+        to="/settings"
+        className="icon-btn"
+        title="Settings: your API keys"
+        aria-label="Settings"
+      >
+        ⚙
       </Link>
       <button
         className="icon-btn"

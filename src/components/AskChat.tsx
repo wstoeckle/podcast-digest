@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import type { ChatTurn, Citation } from '../types';
-import { streamAsk } from '../net/api';
+import type { ChatTurn, Citation, KeyErrorCode } from '../types';
+import { keyErrorCode, streamAsk } from '../net/api';
 import { applyAskEvent, type AnswerTurn as Turn } from '../lib/askAnswer';
 import TimeChip from './TimeChip';
+import KeyPrompt from './KeyPrompt';
 
 const SUGGESTIONS = [
   'What were the main takeaways?',
@@ -27,6 +28,7 @@ export default function AskChat({
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState<KeyErrorCode>();
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -40,6 +42,7 @@ export default function AskChat({
     const q = question.trim();
     if (!q || busy) return;
     setError('');
+    setErrorCode(undefined);
     setInput('');
     // The API gets plain text history; markers and passages stay in the UI.
     const history: ChatTurn[] = turns.map(({ role, content }) => ({ role, content }));
@@ -65,7 +68,10 @@ export default function AskChat({
         ctrl.signal,
       );
     } catch (err) {
-      if ((err as Error).name !== 'AbortError') setError((err as Error).message);
+      if ((err as Error).name !== 'AbortError') {
+        setError((err as Error).message);
+        setErrorCode(keyErrorCode(err));
+      }
     } finally {
       setBusy(false);
       abortRef.current = null;
@@ -103,6 +109,7 @@ export default function AskChat({
       )}
 
       {error && <p className="error">{error}</p>}
+      <KeyPrompt code={errorCode} />
 
       <form
         className="ask-form"

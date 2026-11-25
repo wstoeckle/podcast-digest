@@ -5,6 +5,7 @@ import type {
   RecommendationResult,
 } from '../src/lib/listening.js';
 import { evaluate, object, type Question } from './_lib/typesafe.js';
+import { OWNER_ONLY, access } from './_lib/access.js';
 import { rateLimit, llmPerHour, llmGlobalPerHour, tooMany } from './_lib/ratelimit.js';
 
 export function parseInput(raw: unknown): RecommendationInput {
@@ -133,6 +134,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     input = parseInput(req.body as unknown);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid input.' });
+    return;
+  }
+  // Runs on the app's own TypeSafe key, so only for the owner.
+  if (!access(req).owner) {
+    res.status(403).json({ error: `Listening plans: ${OWNER_ONLY}` });
     return;
   }
   if (!process.env.TYPESAFE_API_KEY?.trim()) {

@@ -1,7 +1,8 @@
 // Claude helpers for the digest + Q&A endpoints and the overnight batches.
-// Uses the official SDK. The live functions degrade to demo-mode canned
-// content when ANTHROPIC_API_KEY is unset, so the app is fully usable (and
-// testable) without a key.
+// Uses the official SDK. The live functions take the API key to spend (the
+// caller's own, or the app's for its owner; see access.ts) and degrade to
+// demo-mode canned content without one, so the app is fully usable (and
+// testable) without a key. The overnight batches always use the app's key.
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { AskEvent, ChatTurn, Digest } from '../../src/types.js';
@@ -47,10 +48,25 @@ export function hasClaude(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
-function client(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  return new Anthropic({ apiKey });
+function client(apiKey: string | undefined): Anthropic | null {
+  return apiKey ? new Anthropic({ apiKey }) : null;
+}
+
+/** Whether Anthropic accepts a key, by listing models (free: no tokens spent). */
+export async function checkClaudeKey(apiKey: string): Promise<'ok' | 'rejected' | 'unknown'> {
+  try {
+    await new Anthropic({ apiKey, maxRetries: 0, timeout: 10_000 }).models.list({ limit: 1 });
+    return 'ok';
+  } catch (err) {
+    return isKeyRejected(err) ? 'rejected' : 'unknown';
+  }
+}
+
+/** True when Anthropic refused the key itself (invalid, revoked, or not allowed). */
+export function isKeyRejected(err: unknown): boolean {
+  return (
+    err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError
+  );
 }
 
 /**
@@ -118,9 +134,13 @@ function logUsage(route: 'digest' | 'ask' | 'batch', msg: UsageLike): void {
   );
 }
 
-/** Generate a structured digest from a transcript. */
-export async function generateDigest(transcript: string, meta: EpisodeMeta): Promise<Digest> {
-  const c = client();
+/** Generate a structured digest from a transcript, on `apiKey` (demo content without one). */
+export async function generateDigest(
+  transcript: string,
+  meta: EpisodeMeta,
+  apiKey: string | undefined,
+): Promise<Digest> {
+  const c = client(apiKey);
   if (!c) return demoDigest(meta);
 
   const msg = await c.beta.messages.create({
@@ -142,6 +162,8 @@ export interface AskOptions {
   history: ChatTurn[];
   question: string;
   onEvent: (event: AskEvent) => void;
+  /** The key to spend; a demo answer without one. */
+  apiKey: string | undefined;
 }
 
 /**
@@ -151,7 +173,7 @@ export interface AskOptions {
  */
 export async function streamAnswer(opts: AskOptions): Promise<void> {
   const { transcript, meta, history, question, onEvent } = opts;
-  const c = client();
+  const c = client(opts.apiKey);
 
   if (!c) {
     for (const chunk of chunkText(demoAnswer(question))) {
@@ -226,7 +248,7 @@ export async function streamAnswer(opts: AskOptions): Promise<void> {
 // ---- Overnight batches (Message Batches API: half price, asynchronous) ----
 
 function requireClient(): Anthropic {
-  const c = client();
+  const c = client(process.env.ANTHROPIC_API_KEY);
   if (!c) throw new Error('ANTHROPIC_API_KEY is not set');
   return c;
 }

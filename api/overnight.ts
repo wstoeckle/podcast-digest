@@ -23,10 +23,14 @@ import {
   type OvernightDeps,
   type OvernightStore,
 } from './_lib/overnight.js';
+import { access } from './_lib/access.js';
 import { rateLimit, tooMany } from './_lib/ratelimit.js';
 import { isRedisDown, markRedisDown, redis } from './_lib/redis.js';
 import { sttProvider } from './_lib/stt.js';
 import { findExistingTranscript } from './_lib/transcripts.js';
+
+const OWNER_ONLY_OVERNIGHT =
+  "Overnight digests run on this app's owner's account, so they're only for the owner.";
 
 const REDIS_DOWN =
   "Overnight digests are paused: the server can't reach its Redis database right now.";
@@ -36,6 +40,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const kv = redis();
 
   if (req.method === 'GET' && isCron(req)) return void (await nightly(res, kv));
+
+  // Overnight digests run on the app's own keys and one shared list of shows,
+  // so they're the owner's alone.
+  if (!access(req).owner) {
+    if (req.method === 'POST') res.status(403).json({ error: OWNER_ONLY_OVERNIGHT });
+    else res.status(200).json(unavailable(OWNER_ONLY_OVERNIGHT));
+    return;
+  }
 
   if (!kv || !hasClaude()) {
     res
